@@ -84,7 +84,7 @@ def make_entry(protein_chains, name, seeds=None, constraints=None):
     entry = {"name": name}
     if seeds:
         entry["modelSeeds"] = seeds
-    entry["sequences"] = [protein_chains]
+    entry["sequences"] = protein_chains
 
     if constraints:
         entry["constraints"] = constraints
