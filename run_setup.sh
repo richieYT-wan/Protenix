@@ -1,8 +1,11 @@
-conda create -c conda-forge -c pytorch -c bioconda -n protenix python=3.12 pip torch -y
+set -euxo pipefail
+conda env create -f protenix_env.yaml -y
+
+# Manually use pip to install various things because the environment didn't work before
+sleep 1
 conda activate protenix
-pip install --upgrade protenix --index-url https://pypi.org/simple
 CUDA_VERSION="$(python -c "import torch; print(torch.version.cuda)")"
-conda install -c nvidia cuda-toolkit=$CUDA_VERSION
+pip install cuda-toolkit==$CUDA_VERSION
 export CUDA_HOME=$CONDA_PREFIX
 
 # Symlink headers
