@@ -1,6 +1,9 @@
 """
 
-This
+This script reads a csv file and tries to parse the target, then writes a json file compatible with Protenix's input format
+Can also be passed the target sequences in the CLI:
+example: 
+python3 scripts/make_json_from_csv.py -f data/02_intermediate/1XIW_evaluation_engine_inputs/rfab_1XIW_eval_input_sequences.csv -t QTPYKVSISGTTVILTCPQYPGSEILWQHNDKNIGGDEDDKNIGSDEDHLSLKEFSELEQSGYYVCYPRGSKPEDANFYLYLRARVCENCM MKIPIEELEDRVFVNCNTSITWVEGTVGTLLSDITRLDLGKRILDPRGIYRCNESTVQVHYRMCQS -s 0 10 20 -r 0 30000
 
 """
 
@@ -12,6 +15,10 @@ from pathlib import Path
 from typing import List, Union, Dict, Tuple
 import subprocess
 import tempfile
+from joblib import Parallel, delayed
+from multiprocessing import Pool
+from functools import partial
+from tqdm.auto import tqdm
 
 def parse_args():
     parser = ArgumentParser()
@@ -133,17 +140,22 @@ def make_dummy_msa(sequence: str, name: str, msa_dir: Path) -> Tuple[Path, Path]
 def make_protein_chain(sequence, id, count=1,
                        pairing_path: Union[str,Path]=None,
                        nonpairing_path: Union[str, Path]=None):
-    return {
+    res = {
         "proteinChain": {
             "sequence": sequence,
             "id": [id],
             "count": count,
-            "msa": make_msa(pairing_path, nonpairing_path)
         }
     }
+    if (pairing_path and nonpairing_path):
+        res['proteinChain']['pairedMsaPath'] = str(pairing_path)
+        res['proteinChain']['unpairedMsaPath'] = str(nonpairing_path)
+        
+    return res
+        
 
 # Placeholder for if we add constraints to the folding
-def make_contraints():
+def make_constraints():
     pass
 
 
@@ -182,38 +194,21 @@ def make_entry_from_row(vh:str, target_json:Dict, name: str, msa_dir: Path,
     return make_entry(protein_chains, name, seeds, constraints)
 
 
-
-def make_entry_from_old(vh:str, target:Dict, name: str, seeds=None,
-                        precomputed_msa_dir=None, pairing_db=None, constraints=None):
-    """
-    Used to create a full entry based on iterating on vh sequences
-    Args:
-        vh:
-        target: Dictionary as processed by process_target_msa_template
-        name:
-        seeds:
-        precomputed_msa_dir:
-        pairing_db:
-        constraints:
-
-    Returns:
-        entry
-    """
-    # Start with VH with no precomputed msa
-    protein_chains = [make_protein_chain(vh, 'H', 1, precomputed_msa_dir=None, pairing_db=None)]
-    if type(target)==list:
-        for i, t in enumerate(target):
-            protein_chains.append(make_protein_chain(t, f'T{i}', 1, precomputed_msa_dir, pairing_db))
-    elif type(target)==str:
-        protein_chains.append(make_protein_chain(target, 'T', 1, precomputed_msa_dir, pairing_db))
-    return make_entry(protein_chains, name, seeds, constraints)
+# For multiprocessing
+def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, constraints):
+    _, row = row_tuple
+    return make_entry_from_row(row['vh'], target_json,
+                               name=row['seq_id'], seeds=seeds,
+                               msa_dir=msa_dir, constraints=constraints)
 
 
 def main():
     args = parse_args()
     # Read the df and parse rows to be selected + creates outfile
     start, end = args.rows
-    df = pd.read_csv(args.input_file).iloc[start:end]
+    df = pd.read_csv(args.input_file)
+    df = df.iloc[max(start, 0):min(len(df), end)]
+    
     # If no output_file specified, will save in the same directory as input_file with filename replaced as json
     if not args.output_file:
         parent = args.input_file.parent
@@ -241,10 +236,25 @@ def main():
     ###################################################
     df['seq_id'] = [f'{args.input_file.stem}_id_{i:06}' for i in range(len(df))]
     entries = []
-    for _, row in df[['vh', 'seq_id']].iterrows():
-        entries.append(make_entry_from_row(row['vh'], target_json,
-                                           name = row['seq_id'], seeds=args.seeds,
-                                           msa_dir = outfile.parent / 'msa', constraints=None))
+    
+    # Multiprocessing 
+    wrapper = partial(wrapper_make_entry, 
+                      target_json=target_json, 
+                      seeds=args.seeds, 
+                      msa_dir=outfile.parent / 'msa', 
+                      constraints=None)
+
+    rows = list(df[['vh', 'seq_id']].iterrows())
+
+    with Pool(16) as p:
+        entries = list(tqdm(p.imap(wrapper, rows), total=len(rows)))
+
+
+                                   
+    # for _, row in df[['vh', 'seq_id']].iterrows():
+    #     entries.append(make_entry_from_row(row['vh'], target_json,
+    #                                        name = row['seq_id'], seeds=args.seeds,
+    #                                        msa_dir = outfile.parent / 'msa', constraints=None))
 
     with open(outfile, 'w') as file:
         json.dump(entries, file, indent=2)
