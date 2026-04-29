@@ -331,7 +331,7 @@ model_name="protenix_tiny_default_v0.5.0"
 ## self test
 python runner/inference.py \
     --model_name 'protenix_base_20250630_v1.0.0' --seeds 13,30,1213 --dump_dir ./output/260429_RFab_1XIW_cofolds_no_constraints \
-    --input_json_path ./data/02_intermediate/260429_rfab_1XIW_filtered/rfab_hyp03_filtered.json \
+    --input_json_path ./data/02_intermediate/260429_rfab_1XIW_filtered/rfab_hyp03_1XIW_filtered.json \
     --model.N_cycle 10 --sample_diffusion.N_sample 5 --sample_diffusion.N_step 200 \
     --triangle_attention "cuequivariance" --triangle_multiplicative "cuequivariance"
 
