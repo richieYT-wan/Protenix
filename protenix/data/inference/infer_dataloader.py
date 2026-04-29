@@ -59,7 +59,7 @@ def get_inference_dataloader(configs: Any) -> DataLoader:
     )
     dataloader = DataLoader(
         dataset=inference_dataset,
-        batch_size=1,
+        batch_size=4, # TBD
         sampler=sampler,
         collate_fn=collate_fn_identity,
         num_workers=configs.num_workers,
