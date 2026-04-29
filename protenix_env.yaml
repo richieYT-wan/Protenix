@@ -23,6 +23,7 @@ dependencies:
   - py3dmol
   - freesasa
   - mmseqs2
+  - hmmer
   - anarci
   - abnumber # used to number CDR / framework regions
   - tmtools # Used for TM score / RMSD and alignment and other utils
