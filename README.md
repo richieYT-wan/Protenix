@@ -47,8 +47,10 @@ Protenix is built for high-accuracy structure prediction. It serves as an initia
 ### 🛠 Quick Installation
 
 ```bash
-pip install protenix
+pip install --upgrade protenix --index-url https://pypi.org/simple
 ```
+
+If your package mirror lags behind the latest GitHub release, use the official PyPI index above to make sure the installed CLI matches the commands shown in this README.
 
 ### 🧬 Quick Prediction
 
@@ -215,4 +217,4 @@ The Protenix project including both code and model parameters is released under 
 
 ## Contact Us
 
-We welcome inquiries and collaboration opportunities for advanced applications of our model, such as developing new features, fine-tuning for specific use cases, and more. Please feel free to contact us at ai4s-bio@bytedance.com.
+We welcome inquiries and collaboration opportunities for advanced applications of our model, such as developing new features, fine-tuning for specific use cases, and more. Please feel free to contact us at anewbt_mind@bytedance.com.
