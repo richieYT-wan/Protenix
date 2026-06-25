@@ -7,7 +7,7 @@ set -euo pipefail
 N_SHARDS=4
 INPUT_JSON="./data/02_intermediate/260429_rfab_1XIW_filtered/rfab_hyp03_1XIW_filtered.json"
 DUMP_BASE="./output/260429_RFab_1XIW_cofolds_no_constraints"
-
+ls ./output/260429_RFab_1XIW_cofolds_no_constraints/**
 # 1. Shard the input JSON (sharder lives in scripts/)
 python scripts/shard.py "$INPUT_JSON" $N_SHARDS
 
