@@ -137,3 +137,5 @@ wandb/
 output/
 release_data/
 debug/
+.idea/
+data/**

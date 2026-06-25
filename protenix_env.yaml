@@ -1,0 +1,38 @@
+# Conda environment for running Protenix pipeline
+
+name: protenix
+
+channels:
+  - pyg
+  - conda-forge
+  - nvidia
+  - rosettacommons # For pyrosetta
+  - defaults
+  - bioconda
+
+dependencies:
+  # --- Core ---
+  - python=3.12
+  - pip
+  - pandas
+  - gcsfs
+  - google-cloud-storage
+  - frozendict
+  # --- Bioinformatics & Cheminformatics ---
+  - biopython
+  - py3dmol
+  - freesasa
+  - mmseqs2
+  - hmmer
+  - anarci
+  - abnumber # used to number CDR / framework regions
+  - tmtools # Used for TM score / RMSD and alignment and other utils
+  - pymol-open-source # For alignment and RMSD and other utils
+  - tqdm 
+
+  # --- Pip-installed packages ---
+  - pip:
+    - colabfold[alphafold]
+    - --index-url https://pypi.org/simple
+    - protenix
+    - torch
