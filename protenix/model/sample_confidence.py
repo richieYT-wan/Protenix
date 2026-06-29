@@ -921,7 +921,7 @@ def calculate_chain_based_ipsae(
     min_bin: float,
     max_bin: float,
     no_bins: int,
-    pae_cutoff: float = 10.0,
+    pae_cutoff: float = 8.0,
     eps: float = 1e-8,
 ) -> dict[str, torch.Tensor]:
     """

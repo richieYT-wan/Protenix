@@ -484,6 +484,11 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                 new_configs = update_inference_configs(configs, data["N_token"].item())
                 runner.update_model_configs(new_configs)
                 prediction = runner.predict(data)
+                # TODO: HERE WE DUMP THE PREDICTED STRUCTURE
+                #       THEN THE PAE AND PLDDTS FOR IPSAE SHOULD ALSO BE DUMPED HERE
+                #       ALSO, IF WE COMPUTE MIN IPSAE / DOCKQ ETC IS IT POSSIBLE TO UPDATE SUMMARY.JSON BEFORE DUMP?
+                #       Must save PAE matrix and pLDDT vector into prediction dictionary.
+                #       Then, we can compute it directly from the variable OR read the files and be more correct?
                 runner.dumper.dump(
                     dataset_name="",
                     pdb_id=sample_name,

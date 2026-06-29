@@ -6,7 +6,7 @@ example:
 python3 scripts/make_json_from_csv.py -f data/02_intermediate/1XIW_evaluation_engine_inputs/rfab_1XIW_eval_input_sequences.csv -t QTPYKVSISGTTVILTCPQYPGSEILWQHNDKNIGGDEDDKNIGSDEDHLSLKEFSELEQSGYYVCYPRGSKPEDANFYLYLRARVCENCM MKIPIEELEDRVFVNCNTSITWVEGTVGTLLSDITRLDLGKRILDPRGIYRCNESTVQVHYRMCQS -s 0 10 20 -r 0 30000
 
 """
-
+import hashlib
 from argparse import ArgumentParser
 import pandas as pd
 import json
@@ -198,8 +198,52 @@ def make_entry_from_row(vh:str, target_json:Dict, name: str, msa_dir: Path,
 def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, constraints):
     _, row = row_tuple
     return make_entry_from_row(row['vh'], target_json,
-                               name=row['seq_id'], seeds=seeds,
-                               msa_dir=msa_dir, constraints=constraints)
+                               name=f"vh_id_{generate_fablab_hash(row['vh'])}",
+                               seeds=seeds, msa_dir=msa_dir, constraints=constraints)
+
+
+# Taken from FabLab's hashing
+def generate_fablab_hash(sequence, length=12):
+    """Generate a deterministic, uppercase alphanumeric hash for a given input sequence.
+
+    This function uses the MD5 hash of the input string, converts it into an integer,
+    and then encodes it in a custom base-36 alphabet (0-9, A-Z). The final hash is
+    truncated or left-padded with zeros to match the desired length (in case of anormaly
+    small sequences). The base-36 alphabet is choosen to be more human friendly than
+    full ascii character set, but  having higher cardinality than a simple base-16.
+
+    Parameters:
+        sequence (str): The input aa string to hash.
+        length (int): The length of the resulting hash string (default is 10).
+        length of 10 ensure no collision in 5 million sequence set
+
+    Returns:
+        str: An uppercase alphanumeric hash string of the specified length.
+
+    Raises:
+        ValueError: If the input is not a non-empty string.
+    """
+
+    # define possible output character set
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    base = len(alphabet)
+
+    # Generate the MD5 hash
+    md5_hash = hashlib.md5(sequence.encode()).digest()
+
+    # Convert the hash to an integer
+    hash_int = int.from_bytes(md5_hash, byteorder="big")
+
+    # Encode the integer to the custom base
+    encoded = []
+    while hash_int > 0:
+        hash_int, remainder = divmod(hash_int, base)
+        encoded.append(alphabet[remainder])
+
+    # Pad or trim to exact length
+    encoded_str = "".join(reversed(encoded)).rjust(length, "0")[:length]
+
+    return encoded_str
 
 
 def main():
