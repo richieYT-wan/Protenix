@@ -33,6 +33,7 @@ from configs.configs_inference import inference_configs
 from configs.configs_model_type import model_configs
 from protenix.config.config import parse_configs, parse_sys_args
 from protenix.data.inference.infer_dataloader import get_inference_dataloader
+from protenix.metrics.ipsae import IPSAECalculator
 from protenix.model.protenix import Protenix
 from protenix.utils.distributed import DIST_WRAPPER
 from protenix.utils.seed import seed_everything
@@ -503,6 +504,8 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
     if batched_seeds:
         logger.info(f"Batched seed mode: {len(seeds)} seeds in one forward pass")
 
+    # Initialize IPSAE calculator once, re-use it for each seed/batch
+    ipsae_calculator = IPSAECalculator(pae_cutoff=8.0, dist_cutoff=8.0, pdockq_cutoff=8.0)
     # ---- Main loop ----------------------------------------------------------
     t0_start = time.time()
     for seed_idx, seed in enumerate(seeds):
@@ -635,9 +638,16 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                                 data, runner.device, transfer_stream
                             )
                             torch.cuda.current_stream().wait_event(transfer_event)
+                        # This runner.predict is using Protenix().forward()
+                        # Which at the end of its forward uses main_inference_loop
+                        # and then computes the pred_dict which contains the predictions
+                        # here we have prediction = runner.predict
+                        # because this wrapper discards the other 2 outputs (label_dict, log_dict)
+                        # Need to compute ipsae here because Model itself does not have access to atom_array
                         prediction = runner.predict(
                             data, already_on_device=(transfer_event is not None)
                         )
+                        # TODO : ADD IPSAE HERE and update dump to save ipsae
                         runner.dumper.dump(
                             dataset_name="",
                             pdb_id=sample_name,
@@ -671,6 +681,8 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                                 sliced_pred[k] = v[s_idx * n_samples_per_seed:(s_idx + 1) * n_samples_per_seed]
                             else:
                                 sliced_pred[k] = v
+
+                        # TODO also add IPSAE here for the batched approach
                         runner.dumper.dump(
                             dataset_name="",
                             pdb_id=sample_name,
@@ -684,6 +696,7 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                             },
                         )
                 else:
+                # HERE NOT BATCHED SEED, LINEAR
                     prediction = runner.predict(
                         data, already_on_device=(transfer_event is not None)
                     )

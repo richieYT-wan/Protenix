@@ -23,12 +23,12 @@ from tqdm.auto import tqdm
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('-f', '--input_file', type=Path, required=True, help='input csv file')
-    parser.add_argument('-o', '--output_file', type=Path, required=False, default = None, help='output json file')
+    parser.add_argument('-o', '--output_dir', type=Path, required=True, default = None, help='output json file')
     parser.add_argument('-t', '--target_sequences', type=str, required=False, default=None, nargs='+', help='Target sequence. By default, will try to find a column in the dataframe containing the target sequence')
+    parser.add_argument('-n', '--name', type = str, required=False, default=None, help='Custom sample name')
     parser.add_argument('-s', '--seeds', type=int, nargs='+', help= 'Seeds to use. [ex: --seeds 0 10 20]')
     parser.add_argument('-r', '--rows', type=int, default=[0, 10], nargs=2,
                         metavar=('START', 'END'), help = 'Start/end rows to select from file [ex: --rows 0 100]')
-    parser.add_argument('--precomputed_msa_dir', type=str, default=None)
     parser.add_argument('--pairing_db', type=str, default= None, help='ex: uniref100')
     return parser.parse_args()
 
@@ -198,7 +198,7 @@ def make_entry_from_row(vh:str, target_json:Dict, name: str, msa_dir: Path,
 def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, constraints):
     _, row = row_tuple
     return make_entry_from_row(row['vh'], target_json,
-                               name=f"vh_id_{generate_fablab_hash(row['vh'])}",
+                               name=f"{row['seq_id']}_{generate_fablab_hash(row['vh'])}",
                                seeds=seeds, msa_dir=msa_dir, constraints=constraints)
 
 
@@ -252,16 +252,10 @@ def main():
     start, end = args.rows
     df = pd.read_csv(args.input_file)
     df = df.iloc[max(start, 0):min(len(df), end)]
-    
-    # If no output_file specified, will save in the same directory as input_file with filename replaced as json
-    if not args.output_file:
-        parent = args.input_file.parent
-        basename = args.input_file.stem
-        outfile = parent / (basename + '.json')
-    else:
-        outfile = args.out_file
 
-
+    out_dir = Path(args.output_dir)
+    out_file = out_dir / (Path(args.input_file).stem + '.json')
+    msa_dir = out_dir / 'vh_dummy_msa'
     ###################################################
     #    Processing target for MSA/template search    #
     ###################################################
@@ -273,19 +267,23 @@ def main():
     else:
         target = args.target_sequences
 
-    target_json = process_target_msa_template(target, outfile.parent)
+    target_json = process_target_msa_template(target, out_dir)
 
     ###################################################
     #      Processing VHH + target for final JSON     #
     ###################################################
-    df['seq_id'] = [f'{args.input_file.stem}_id_{i:06}' for i in range(len(df))]
+    if args.sample_name:
+        df['seq_id'] = [f'{args.sample_name}_id_{i:06}' for i in range(len(df))]
+    else:
+        df['seq_id'] = [f'{Path(args.input_file).stem}_id_{i:06}' for i in range(len(df))]
+
     entries = []
     
     # Multiprocessing 
     wrapper = partial(wrapper_make_entry, 
                       target_json=target_json, 
                       seeds=args.seeds, 
-                      msa_dir=outfile.parent / 'msa', 
+                      msa_dir= msa_dir,
                       constraints=None)
 
     rows = list(df[['vh', 'seq_id']].iterrows())
@@ -293,14 +291,7 @@ def main():
     with Pool(16) as p:
         entries = list(tqdm(p.imap(wrapper, rows), total=len(rows)))
 
-
-                                   
-    # for _, row in df[['vh', 'seq_id']].iterrows():
-    #     entries.append(make_entry_from_row(row['vh'], target_json,
-    #                                        name = row['seq_id'], seeds=args.seeds,
-    #                                        msa_dir = outfile.parent / 'msa', constraints=None))
-
-    with open(outfile, 'w') as file:
+    with open(out_file, 'w') as file:
         json.dump(entries, file, indent=2)
 
 

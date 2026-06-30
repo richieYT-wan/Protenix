@@ -127,7 +127,9 @@ class DataDumper:
             entity_poly_type (dict[str, str]): Dictionary mapping entity IDs to their polymer types.
             seed (int): Random seed used for the prediction.
         """
-        prediction_save_dir = os.path.join(dump_dir, "predictions")
+        # prediction_save_dir = os.path.join(dump_dir, "predictions")
+        # os.makedirs(prediction_save_dir, exist_ok=True)
+        prediction_save_dir = dump_dir
         os.makedirs(prediction_save_dir, exist_ok=True)
 
         # Dump structure

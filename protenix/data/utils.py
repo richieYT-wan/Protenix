@@ -463,6 +463,7 @@ def save_structure_cif(
     """
     pred_atom_array = copy.deepcopy(atom_array)
     pred_pose = pred_coordinate.cpu().numpy()
+    # Here atom_array is only used as a base, the coordinates are replaced by the predicted coordinates
     pred_atom_array.coord = pred_pose
     save_atoms_to_cif(
         output_fpath,
