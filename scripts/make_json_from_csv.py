@@ -1,162 +1,168 @@
 """
+Generates Protenix-compatible JSONs from a CSV of VH sequences against a fixed target.
+Target MSA is computed once. VHH MSAs are built from a local SAbDAb nanobody database.
+Local database is built from ~/scripts/setup_vhh_db.sh
 
-This script reads a csv file and tries to parse the target, then writes a json file compatible with Protenix's input format
-Can also be passed the target sequences in the CLI:
-example: 
-python3 scripts/make_json_from_csv.py -f data/02_intermediate/1XIW_evaluation_engine_inputs/rfab_1XIW_eval_input_sequences.csv -t QTPYKVSISGTTVILTCPQYPGSEILWQHNDKNIGGDEDDKNIGSDEDHLSLKEFSELEQSGYYVCYPRGSKPEDANFYLYLRARVCENCM MKIPIEELEDRVFVNCNTSITWVEGTVGTLLSDITRLDLGKRILDPRGIYRCNESTVQVHYRMCQS -s 0 10 20 -r 0 30000
-
+Example:
+    python3 scripts/make_json_from_csv.py \
+        -f data/01_raw/<experiment_name>/<input_file>.csv \
+        -o data/02_intermediate/<experiment_name> \
+        --target_sequences <target_domain_0> <target_domain_1> [...] <target_domain_n> \
+        --oas-db <database_path>/sabdab_nano_db \
+        -s 0 13 30 42 1213 -r 0 100
 """
 import hashlib
-from argparse import ArgumentParser
-import pandas as pd
 import json
-import os, sys
-from pathlib import Path
-from typing import List, Union, Dict, Tuple
 import subprocess
 import tempfile
-from joblib import Parallel, delayed
-from multiprocessing import Pool
+
+from pathlib import Path
+from argparse import ArgumentParser
 from functools import partial
+from multiprocessing import Pool
+
+from typing import Dict, List, Tuple, Union
+
+import pandas as pd
 from tqdm.auto import tqdm
+
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('-f', '--input_file', type=Path, required=True, help='input csv file')
-    parser.add_argument('-o', '--output_dir', type=Path, required=True, default = None, help='output json file')
-    parser.add_argument('-t', '--target_sequences', type=str, required=False, default=None, nargs='+', help='Target sequence. By default, will try to find a column in the dataframe containing the target sequence')
+    parser.add_argument('-f', '--input_file', type=Path, required=True)
+    parser.add_argument('-o', '--output_dir', type=Path, required=True)
+    parser.add_argument('-t', '--target_sequences', type=str, nargs='+', default=None)
+    parser.add_argument('-s', '--seeds', type=int, nargs='+')
     parser.add_argument('-n', '--name', type = str, required=False, default=None, help='Custom sample name')
-    parser.add_argument('-s', '--seeds', type=int, nargs='+', help= 'Seeds to use. [ex: --seeds 0 10 20]')
     parser.add_argument('-r', '--rows', type=int, default=[0, 10], nargs=2,
-                        metavar=('START', 'END'), help = 'Start/end rows to select from file [ex: --rows 0 100]')
-    parser.add_argument('--pairing_db', type=str, default= None, help='ex: uniref100')
+                        metavar=('START', 'END'))
+    parser.add_argument('--oas-db', type=str,
+                        default='/data/databases/oas_nano/oas_nano_db',
+                        help='Path to MMseqs2 OAS nanobody database')
+    parser.add_argument('--skip-vhh-msa', action='store_true',
+                        help='Skip VHH MSA building (fallback to dummy)')
+    parser.add_argument('--n-jobs', type=int, default=16)
     return parser.parse_args()
 
 
-def find_target_col(df: pd.DataFrame, candidates: List[str]= None):
-    """
-    Find the column in a DataFrame that likely contains target sequences.
+from typing import Tuple
 
-    Args:
-        df: pandas DataFrame
-        candidates: optional list of column name patterns to search for.
-                    Defaults to common target sequence column names.
+def build_vhh_msa(
+    sequence: str,
+    name: str,
+    output_dir: Path,
+    oas_db: str = "/data/databases/oas_nano/oas_nano_db",
+    sensitivity: float = 7.5,
+    max_seqs: int = 5000,
+) -> Tuple[Path, Path]:
+    """
+    Run MMseqs2 search of a VHH against OAS, produce paired+unpaired A3M files.
 
     Returns:
-        str: the matching column name
-
-    Raises:
-        ValueError: if no matching column is found
+        (paired_msa_path, unpaired_msa_path)
     """
+    output_dir = Path(output_dir) / name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        query_fasta = tmpdir / "query.fasta"
+        query_fasta.write_text(f">{name}\n{sequence}\n")
+
+        # Build query DB
+        query_db = tmpdir / "queryDB"
+        subprocess.run(["mmseqs", "createdb", str(query_fasta), str(query_db)], check=True)
+
+        # Search
+        result_db = tmpdir / "resultDB"
+        subprocess.run([
+            "mmseqs", "search",
+            str(query_db), oas_db, str(result_db), str(tmpdir / "search_tmp"),
+            "-s", str(sensitivity),
+            "--max-seqs", str(max_seqs),
+            "-a",  # store alignments
+        ], check=True)
+
+        # Convert to a3m
+        a3m_out = output_dir / "msa.a3m"
+        subprocess.run([
+            "mmseqs", "result2msa",
+            str(query_db), oas_db, str(result_db), str(a3m_out),
+            "--msa-format-mode", "5",  # a3m
+        ], check=True)
+
+    # Protenix expects paired & unpaired MSAs. For VHH, no pairing makes sense
+    # (no co-evolution with antigen), so we use the same file for both,
+    # or put only the query in the paired file.
+    unpaired_path = output_dir / "non_pairing.a3m"
+    paired_path = output_dir / "pairing.a3m"
+
+    a3m_text = a3m_out.read_text()
+    unpaired_path.write_text(a3m_text)
+    # Paired MSA: just the query (no pairing partner exists)
+    paired_path.write_text(f">{name}\n{sequence}\n")
+
+    return paired_path, unpaired_path
+
+def find_target_col(df: pd.DataFrame, candidates: List[str] = None):
     if candidates is None:
-        candidates = [
-            'target', 'target_seq', 'target_sequence',
-            'sequence', 'seq', 'protein_seq', 'protein_sequence',
-            'amino_acid', 'aa_seq', 'fasta'
-        ]
-
-    columns = df.columns.str.lower()
-
-    # 1. Try exact match first
+        candidates = ['target', 'target_seq', 'target_sequence', 'sequence',
+                      'seq', 'protein_seq', 'protein_sequence', 'amino_acid',
+                      'aa_seq', 'fasta']
+    cols_lower = df.columns.str.lower()
     for c in candidates:
-        matches = [col for col, col_lower in zip(df.columns, columns) if col_lower == c]
+        matches = [col for col, cl in zip(df.columns, cols_lower) if cl == c]
         if matches:
             return matches[0]
-
-    # 2. Try partial match (column contains candidate string)
     for c in candidates:
-        matches = [col for col, col_lower in zip(df.columns, columns) if c in col_lower]
+        matches = [col for col, cl in zip(df.columns, cols_lower) if c in cl]
         if matches:
             return matches[0]
-
-    raise ValueError(
-        f"Could not find a target sequence column. "
-        f"Columns available: {list(df.columns)}"
-    )
+    raise ValueError(f"No target column found in {list(df.columns)}")
 
 
-def process_target_msa_template(target: Union[List, str], output_dir: Path):
-    """
-    Takes the target and builds a JSON to then run `protenix mt` and get its MSA and template
-    Args:
-        target:
-
-    Returns:
-    """
-
+def process_target_msa_template(target: Union[List, str], output_dir: Path) -> Dict:
+    """Run protenix mt on the target to get its MSA + templates. Runs once."""
     protein_chains = []
-    if type(target)==list:
+    if isinstance(target, list):
         for i, t in enumerate(target):
-            protein_chains.append(make_protein_chain(t, f'T{i}', 1, None, None))
-    elif type(target)==str:
-        protein_chains.append(make_protein_chain(target, 'T', 1, None, None))
+            protein_chains.append(make_protein_chain(t, f'T{i}', 1))
+    else:
+        protein_chains.append(make_protein_chain(target, 'T', 1))
 
-    entry = [make_entry(protein_chains, 'target', None, None)]
+    entry = [make_entry(protein_chains, 'target')]
     with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as tmp:
         json.dump(entry, tmp, indent=2)
         tmp_path = Path(tmp.name)
 
-    _ = subprocess.run(
-        [
-            "protenix", "mt",
-            "-i", str(tmp_path),
-            "-o", str(output_dir),
-        ],
-        text=True,
-        check=True
+    subprocess.run(
+        ["protenix", "mt", "-i", str(tmp_path), "-o", str(output_dir)],
+        text=True, check=True
     )
 
     target_file = tmp_path.parent / (tmp_path.stem + '-final-updated.json')
-    with open(target_file, 'r') as f:
-        target_json = json.load(f)
+    with open(target_file) as f:
+        return json.load(f)
 
-    return target_json
-
-def make_msa(pairing_path: Path=None, nonpairing_path: Path=None):
-    # Do default old behaviour
-    if not (pairing_path and nonpairing_path):
-        return {'pairing_db': 'uniref100'}
-    else:
-        return {'pairedMsaPath': str(pairing_path),
-                'unpairedMsaPath': str(nonpairing_path)}
 
 def make_dummy_msa(sequence: str, name: str, msa_dir: Path) -> Tuple[Path, Path]:
-    """
-    Creates a dummy MSA for a given sequence
-    msa_dir should be the containing all the msas, e.g. path/to/msa
-    then in this dir there will be path/to/msa/name/pairing.a3m, msa/<name>/non_pairing.a3m etc
-    """
-    os.makedirs(msa_dir / name, exist_ok=True)
-    pairing_path = msa_dir / name / 'pairing.a3m'
-    nonpairing_path = msa_dir / name / 'non_pairing.a3m'
-    with open(msa_dir / name / 'pairing.a3m', 'w') as f:
-        f.writelines(f'>{name}\n{sequence}\n')
-    with open(msa_dir / name / 'non_pairing.a3m', 'w') as f:
-        f.writelines(f'>{name}\n{sequence}\n')
-
-    return pairing_path, nonpairing_path
+    """Fallback: dummy single-sequence MSA."""
+    (msa_dir / name).mkdir(parents=True, exist_ok=True)
+    pairing = msa_dir / name / 'pairing.a3m'
+    nonpairing = msa_dir / name / 'non_pairing.a3m'
+    pairing.write_text(f'>{name}\n{sequence}\n')
+    nonpairing.write_text(f'>{name}\n{sequence}\n')
+    return pairing, nonpairing
 
 
 def make_protein_chain(sequence, id, count=1,
-                       pairing_path: Union[str,Path]=None,
-                       nonpairing_path: Union[str, Path]=None):
-    res = {
-        "proteinChain": {
-            "sequence": sequence,
-            "id": [id],
-            "count": count,
-        }
-    }
-    if (pairing_path and nonpairing_path):
+                       pairing_path: Union[str, Path] = None,
+                       nonpairing_path: Union[str, Path] = None):
+    res = {"proteinChain": {"sequence": sequence, "id": [id], "count": count}}
+    if pairing_path and nonpairing_path:
         res['proteinChain']['pairedMsaPath'] = str(pairing_path)
         res['proteinChain']['unpairedMsaPath'] = str(nonpairing_path)
-        
     return res
-        
-
-# Placeholder for if we add constraints to the folding
-def make_constraints():
-    pass
 
 
 def make_entry(protein_chains, name, seeds=None, constraints=None):
@@ -164,136 +170,124 @@ def make_entry(protein_chains, name, seeds=None, constraints=None):
     if seeds:
         entry["modelSeeds"] = seeds
     entry["sequences"] = protein_chains
-
     if constraints:
         entry["constraints"] = constraints
     return entry
 
 
-def make_entry_from_row(vh:str, target_json:Dict, name: str, msa_dir: Path,
-                        seeds: List[int]=None, constraints: List[str]=None,
-                        ):
-    """
-    Used to create a full entry based on iterating on vh sequences
-    Args:
-        vh:
-        target: Dictionary as processed by process_target_msa_template
-        name:
-        seeds:
-        precomputed_msa_dir:
-        pairing_db:
-        constraints:
+def make_entry_from_row(vh: str, target_json: Dict, name: str, msa_dir: Path,
+                        oas_db: str, use_real_msa: bool = True,
+                        seeds: List[int] = None, constraints: List[str] = None):
+    """Build a Protenix entry with VHH + target chains. Both with real MSAs."""
+    if use_real_msa:
+        try:
+            pairing_path, nonpairing_path = build_vhh_msa(
+                sequence=vh, name=name, output_dir=msa_dir, oas_db=oas_db
+            )
+        except Exception as e:
+            print(f"[warn] Real MSA failed for {name} ({e}), falling back to dummy")
+            pairing_path, nonpairing_path = make_dummy_msa(vh, name, msa_dir)
+    else:
+        pairing_path, nonpairing_path = make_dummy_msa(vh, name, msa_dir)
 
-    Returns:
-        entry
-    """
-    # Start with VH with dummy MSA
-    pairing_path, non_pairing_path = make_dummy_msa(vh, name, msa_dir)
-    protein_chains = [make_protein_chain(vh, 'H', 1, pairing_path, non_pairing_path)]
+    protein_chains = [make_protein_chain(vh, 'H', 1, pairing_path, nonpairing_path)]
     protein_chains.extend(target_json[0]['sequences'])
     return make_entry(protein_chains, name, seeds, constraints)
 
 
-# For multiprocessing
-def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, constraints):
+def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, oas_db,
+                       use_real_msa, constraints):
     _, row = row_tuple
-    return make_entry_from_row(row['vh'], target_json,
-                               name=f"{row['seq_id']}_{generate_fablab_hash(row['vh'])}",
-                               seeds=seeds, msa_dir=msa_dir, constraints=constraints)
+    name = f"{row['seq_id']}_{generate_fablab_hash(row['vh'])}"
+    return make_entry_from_row(
+        vh=row['vh'], target_json=target_json, name=name,
+        msa_dir=msa_dir, oas_db=oas_db, use_real_msa=use_real_msa,
+        seeds=seeds, constraints=constraints,
+    )
 
 
-# Taken from FabLab's hashing
 def generate_fablab_hash(sequence, length=12):
-    """Generate a deterministic, uppercase alphanumeric hash for a given input sequence.
-
-    This function uses the MD5 hash of the input string, converts it into an integer,
-    and then encodes it in a custom base-36 alphabet (0-9, A-Z). The final hash is
-    truncated or left-padded with zeros to match the desired length (in case of anormaly
-    small sequences). The base-36 alphabet is choosen to be more human friendly than
-    full ascii character set, but  having higher cardinality than a simple base-16.
-
-    Parameters:
-        sequence (str): The input aa string to hash.
-        length (int): The length of the resulting hash string (default is 10).
-        length of 10 ensure no collision in 5 million sequence set
-
-    Returns:
-        str: An uppercase alphanumeric hash string of the specified length.
-
-    Raises:
-        ValueError: If the input is not a non-empty string.
-    """
-
-    # define possible output character set
     alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     base = len(alphabet)
-
-    # Generate the MD5 hash
     md5_hash = hashlib.md5(sequence.encode()).digest()
-
-    # Convert the hash to an integer
     hash_int = int.from_bytes(md5_hash, byteorder="big")
-
-    # Encode the integer to the custom base
     encoded = []
     while hash_int > 0:
         hash_int, remainder = divmod(hash_int, base)
         encoded.append(alphabet[remainder])
-
-    # Pad or trim to exact length
-    encoded_str = "".join(reversed(encoded)).rjust(length, "0")[:length]
-
-    return encoded_str
+    return "".join(reversed(encoded)).rjust(length, "0")[:length]
 
 
 def main():
     args = parse_args()
-    # Read the df and parse rows to be selected + creates outfile
     start, end = args.rows
     df = pd.read_csv(args.input_file)
     df = df.iloc[max(start, 0):min(len(df), end)]
 
     out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / (Path(args.input_file).stem + '.json')
-    msa_dir = out_dir / 'vh_dummy_msa'
+    vhh_msa_dir = out_dir / 'vh_msa'
+
     ###################################################
     #    Processing target for MSA/template search    #
+    #    (runs exactly once)                          #
     ###################################################
-    # If no target is provided will try to parse from the df
-    if args.target_sequences is None:
-        target_col = find_target_col(df)
-        # assumes a single target for every sequence in the df
-        target = df[target_col].unique()[0]
+    target_json_path = out_dir / 'target_msa_cached.json'
+    if target_json_path.exists():
+        print(f"[info] Loading cached target MSA from {target_json_path}")
+        with open(target_json_path) as f:
+            target_json = json.load(f)
     else:
-        target = args.target_sequences
-
-    target_json = process_target_msa_template(target, out_dir)
+        if args.target_sequences is None:
+            target_col = find_target_col(df)
+            target = df[target_col].unique()[0]
+        else:
+            target = args.target_sequences
+        print(f"[info] Running target MSA/template search...")
+        target_json = process_target_msa_template(target, out_dir)
+        with open(target_json_path, 'w') as f:
+            json.dump(target_json, f, indent=2)
+        print(f"[info] Cached target MSA at {target_json_path}")
 
     ###################################################
     #      Processing VHH + target for final JSON     #
     ###################################################
-    if args.sample_name:
-        df['seq_id'] = [f'{args.sample_name}_id_{i:06}' for i in range(len(df))]
+    if args.name:
+        df['seq_id'] = [f'{args.name}_id_{i:06}' for i in range(len(df))]
     else:
         df['seq_id'] = [f'{Path(args.input_file).stem}_id_{i:06}' for i in range(len(df))]
 
-    entries = []
-    
-    # Multiprocessing 
-    wrapper = partial(wrapper_make_entry, 
-                      target_json=target_json, 
-                      seeds=args.seeds, 
-                      msa_dir= msa_dir,
-                      constraints=None)
+    use_real_msa = not args.skip_vhh_msa
+    if use_real_msa and not Path(args.oas_db + ".dbtype").exists():
+        print(f"[warn] OAS DB not found at {args.oas_db}, falling back to dummy MSAs")
+        use_real_msa = False
+
+    wrapper = partial(
+        wrapper_make_entry,
+        target_json=target_json,
+        seeds=args.seeds,
+        msa_dir=vhh_msa_dir,
+        oas_db=args.oas_db,
+        use_real_msa=use_real_msa,
+        constraints=None,
+    )
 
     rows = list(df[['vh', 'seq_id']].iterrows())
 
-    with Pool(16) as p:
+    # NB: MMseqs2 is multi-threaded internally; using many parallel processes
+    # that each call mmseqs can over-subscribe CPUs. Lower n_jobs if so.
+    n_jobs = args.n_jobs if not use_real_msa else max(1, args.n_jobs // 4)
+    print(f"[info] Building {len(rows)} entries with {n_jobs} workers "
+          f"(real MSAs: {use_real_msa})")
+
+    with Pool(n_jobs) as p:
         entries = list(tqdm(p.imap(wrapper, rows), total=len(rows)))
 
     with open(out_file, 'w') as file:
         json.dump(entries, file, indent=2)
+    print(f"[info] Wrote {len(entries)} entries to {out_file}")
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()
