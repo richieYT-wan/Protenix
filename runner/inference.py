@@ -616,6 +616,10 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                     # Wait for transfer to finish before compute.
                     torch.cuda.current_stream().wait_event(transfer_event)
 
+                # Instantiate IPSAECalculator to use for either mode
+                ipsae_calculator = IPSAECalculator(pae_cutoff=10.0, dist_cutoff=10.0, pdockq_cutoff=8.0)
+
+                # Try running one forward call. If OOM, fallback to sequential
                 if batched_seeds:
                     # Run all seeds in one model forward call
                     try:
@@ -624,6 +628,17 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                             already_on_device=(transfer_event is not None),
                             N_model_seed=len(seeds),
                         )
+                        # prediction has concatenated results across seeds; split per seed.
+                        n_samples_per_seed = configs.sample_diffusion.N_sample
+                        total = len(seeds) * n_samples_per_seed
+                        seed_predictions = []
+                        for s_idx, s_seed in enumerate(seeds):
+                            start, end = s_idx * n_samples_per_seed, (s_idx + 1) * n_samples_per_seed
+                            sliced_pred = {
+                                k: (v[start:end] if isinstance(v, (torch.Tensor, list)) and len(v) == total else v)
+                                for k, v in prediction.items()
+                            }
+                            seed_predictions.append((s_seed, sliced_pred))
                     except torch.cuda.OutOfMemoryError:
                         logger.warning(
                             f"Batched seed inference OOM for {sample_name}, "
@@ -638,87 +653,40 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                                 data, runner.device, transfer_stream
                             )
                             torch.cuda.current_stream().wait_event(transfer_event)
-                        # This runner.predict is using Protenix().forward()
-                        # Which at the end of its forward uses main_inference_loop
-                        # and then computes the pred_dict which contains the predictions
-                        # here we have prediction = runner.predict
-                        # because this wrapper discards the other 2 outputs (label_dict, log_dict)
-                        # Need to compute ipsae here because Model itself does not have access to atom_array
-                        prediction = runner.predict(
-                            data, already_on_device=(transfer_event is not None)
-                        )
-                        # TODO : ADD IPSAE HERE and update dump to save ipsae
-                        runner.dumper.dump(
-                            dataset_name="",
-                            pdb_id=sample_name,
-                            seed=seed,
-                            pred_dict=prediction,
-                            atom_array=atom_array,
-                            entity_poly_type={
-                                k: v
-                                for k, v in data["entity_poly_type"].items()
-                                if v != "non-polymer"
-                            },
-                        )
-                        t2_end = time.time()
-                        logger.info(
-                            f"[Rank {DIST_WRAPPER.rank}] {sample_name} [seed:{seed}] "
-                            f"succeeded (sequential fallback). Model forward time: {t2_end - t2_start:.2f}s. "
-                            f"Results saved to {configs.dump_dir}"
-                        )
-                        torch.cuda.empty_cache()
-                        continue
 
-                    # prediction has concatenated results across seeds.
-                    # Split and dump per seed.
-                    n_samples_per_seed = configs.sample_diffusion.N_sample
-                    for s_idx, s_seed in enumerate(seeds):
-                        sliced_pred = {}
-                        for k, v in prediction.items():
-                            if isinstance(v, torch.Tensor) and v.shape[0] == len(seeds) * n_samples_per_seed:
-                                sliced_pred[k] = v[s_idx * n_samples_per_seed:(s_idx + 1) * n_samples_per_seed]
-                            elif isinstance(v, list) and len(v) == len(seeds) * n_samples_per_seed:
-                                sliced_pred[k] = v[s_idx * n_samples_per_seed:(s_idx + 1) * n_samples_per_seed]
-                            else:
-                                sliced_pred[k] = v
+                # Explicitly state if not instead of "else" due to flag flipping in except block above
+                if not batched_seeds:
+                    # HERE NOT BATCHED SEED, LINEAR
+                    # This runner.predict is using Protenix().forward()
+                    # Which at the end of its forward uses main_inference_loop
+                    # and then computes the pred_dict which contains the predictions
+                    prediction = runner.predict(data, already_on_device=(transfer_event is not None))
+                    seed_predictions = [(seed, prediction)]
 
-                        # TODO also add IPSAE here for the batched approach
-                        runner.dumper.dump(
-                            dataset_name="",
-                            pdb_id=sample_name,
-                            seed=s_seed,
-                            pred_dict=sliced_pred,
-                            atom_array=atom_array,
-                            entity_poly_type={
-                                k: v
-                                for k, v in data["entity_poly_type"].items()
-                                if v != "non-polymer"
-                            },
-                        )
-                else:
-                # HERE NOT BATCHED SEED, LINEAR
-                    prediction = runner.predict(
-                        data, already_on_device=(transfer_event is not None)
-                    )
+                entity_poly_type = {
+                    k: v
+                    for k, v in data["entity_poly_type"].items()
+                    if v != "non-polymer"
+                }
+                # dump for each (seed, pred_dict) pair.
+                for s_seed, pred in seed_predictions:
+                    ipsae_calculator.compute(atom_array, pred, binder_chain='H', target_chain='T')
                     runner.dumper.dump(
                         dataset_name="",
                         pdb_id=sample_name,
-                        seed=seed,
-                        pred_dict=prediction,
+                        seed=s_seed,
+                        pred_dict=pred,
                         atom_array=atom_array,
-                        entity_poly_type={
-                            k: v
-                            for k, v in data["entity_poly_type"].items()
-                            if v != "non-polymer"
-                        },
+                        entity_poly_type=entity_poly_type,
                     )
+                del seed_predictions, prediction
+                torch.cuda.empty_cache()
                 t2_end = time.time()
                 logger.info(
                     f"[Rank {DIST_WRAPPER.rank}] {sample_name} [seed:{seed}] "
                     f"succeeded. Model forward time: {t2_end - t2_start:.2f}s. "
                     f"Results saved to {configs.dump_dir}"
                 )
-                torch.cuda.empty_cache()
             except Exception as e:
                 error_message = (
                     f"[Rank {DIST_WRAPPER.rank}] {sample_name} failed: {e}\n"

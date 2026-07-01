@@ -2,11 +2,11 @@
 ipSAE / pDockQ / pDockQ2 / LIS computation (torch-native).
 
 Adapted from Dunbrack's preprint (https://www.biorxiv.org/content/10.1101/2025.02.10.637595v2)
-and the Nipah competition adaptation
-(https://github.com/adaptyvbio/nipah_ipsae_pipeline/blob/main/ipsae.py).
 
-This version operates directly on in-memory tensors produced by the prediction
-pipeline (no PDB file parsing required, all computation in torch, GPU-friendly):
+
+This version operates directly on in-memory tensors produced by the prediction pipeline,
+Adapted from evaluation engine
+no CIF file parsing required, all computation in torch, GPU-friendly:
   - biotite AtomArray (for chain/residue topology)
   - PAE matrix      (N_tokens, N_tokens)
   - per-atom pLDDT  (N_atoms,)
@@ -31,8 +31,8 @@ def _as_tensor(x, dtype=None, device=None) -> torch.Tensor:
     """Cast numpy/tensor input to torch.Tensor (handles bfloat16 -> float32)."""
     if isinstance(x, torch.Tensor):
         t = x
-        if t.dtype == torch.bfloat16:
-            t = t.to(torch.float32)
+        # if t.dtype == torch.bfloat16:
+        #     t = t.to(torch.float32)
     else:
         t = torch.as_tensor(np.asarray(x))
     if dtype is not None:
@@ -311,23 +311,16 @@ class IPSAECalculator:
             print(f"  [ERROR] Failed to compute IPSAE metrics: {e}")
             return self._empty_result()
 
-    def compute(self, atom_array:AtomArray, pred_dict: Dict[str, List[Dict[str, Any]]],
-                binder_chain: str = "H", target_chain: Union[str, List[str]] = "T"):
-        """
-        Wrapper for running `_compute` on every N sample for ipSAE
-        Args:
-            atom_array ():
-            pred_dict ():
-            binder_chain ():
-            target_chain ():
-
-        Returns:
-
-        """
-
-        for i in range(len(pred_dict['full_data'])):
-            ipsae_results.e
-        return self._compute
+    def compute(self, atom_array, pred_dict, binder_chain="H", target_chain="T") -> List[Dict]:
+        """Returns a list of ipSAE results, one per sample."""
+        results = []
+        for _pdict in pred_dict['full_data']:
+            results.append(self._compute(atom_array, pae_matrix=_pdict['token_pair_pae'],
+                          plddt_vector=_pdict['atom_plddt'],
+                          atom_to_token_idx=_pdict['atom_to_token_idx'],
+                          pred_coordinates= _pdict['atom_coordinate'],
+                          binder_chain=binder_chain, target_chain=target_chain))
+        return results
 
     @staticmethod
     def _empty_result() -> Dict[str, float]:
