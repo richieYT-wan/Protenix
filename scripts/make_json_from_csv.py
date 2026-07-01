@@ -51,7 +51,7 @@ def build_vhh_msa(
     sequence: str,
     name: str,
     output_dir: Path,
-    oas_db: str = "/data/databases/oas_nano/oas_nano_db",
+    sabdab_db: str = "~/search_database/sabdab_nano/sabdab_nano_db",
     sensitivity: float = 7.5,
     max_seqs: int = 5000,
 ) -> Tuple[Path, Path]:
@@ -77,7 +77,7 @@ def build_vhh_msa(
         result_db = tmpdir / "resultDB"
         subprocess.run([
             "mmseqs", "search",
-            str(query_db), oas_db, str(result_db), str(tmpdir / "search_tmp"),
+            str(query_db), sabdab_db, str(result_db), str(tmpdir / "search_tmp"),
             "-s", str(sensitivity),
             "--max-seqs", str(max_seqs),
             "-a",  # store alignments
@@ -87,7 +87,7 @@ def build_vhh_msa(
         a3m_out = output_dir / "msa.a3m"
         subprocess.run([
             "mmseqs", "result2msa",
-            str(query_db), oas_db, str(result_db), str(a3m_out),
+            str(query_db), sabdab_db, str(result_db), str(a3m_out),
             "--msa-format-mode", "5",  # a3m
         ], check=True)
 
@@ -176,13 +176,13 @@ def make_entry(protein_chains, name, seeds=None, constraints=None):
 
 
 def make_entry_from_row(vh: str, target_json: Dict, name: str, msa_dir: Path,
-                        oas_db: str, use_real_msa: bool = True,
+                        sabdab_db: str, use_real_msa: bool = True,
                         seeds: List[int] = None, constraints: List[str] = None):
     """Build a Protenix entry with VHH + target chains. Both with real MSAs."""
     if use_real_msa:
         try:
             pairing_path, nonpairing_path = build_vhh_msa(
-                sequence=vh, name=name, output_dir=msa_dir, oas_db=oas_db
+                sequence=vh, name=name, output_dir=msa_dir, sabdab_db=sabdab_db
             )
         except Exception as e:
             print(f"[warn] Real MSA failed for {name} ({e}), falling back to dummy")
@@ -195,13 +195,13 @@ def make_entry_from_row(vh: str, target_json: Dict, name: str, msa_dir: Path,
     return make_entry(protein_chains, name, seeds, constraints)
 
 
-def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, oas_db,
+def wrapper_make_entry(row_tuple, target_json, seeds, msa_dir, sabdab_db,
                        use_real_msa, constraints):
     _, row = row_tuple
     name = f"{row['seq_id']}_{generate_fablab_hash(row['vh'])}"
     return make_entry_from_row(
         vh=row['vh'], target_json=target_json, name=name,
-        msa_dir=msa_dir, oas_db=oas_db, use_real_msa=use_real_msa,
+        msa_dir=msa_dir, sabdab_db=sabdab_db, use_real_msa=use_real_msa,
         seeds=seeds, constraints=constraints,
     )
 
@@ -259,8 +259,8 @@ def main():
         df['seq_id'] = [f'{Path(args.input_file).stem}_id_{i:06}' for i in range(len(df))]
 
     use_real_msa = not args.skip_vhh_msa
-    if use_real_msa and not Path(args.oas_db + ".dbtype").exists():
-        print(f"[warn] OAS DB not found at {args.oas_db}, falling back to dummy MSAs")
+    if use_real_msa and not Path(args.sabdab_db + ".dbtype").exists():
+        print(f"[warn] OAS DB not found at {args.sabdab_db}, falling back to dummy MSAs")
         use_real_msa = False
 
     wrapper = partial(
@@ -268,7 +268,7 @@ def main():
         target_json=target_json,
         seeds=args.seeds,
         msa_dir=vhh_msa_dir,
-        oas_db=args.oas_db,
+        sabdab_db=args.sabdab_db,
         use_real_msa=use_real_msa,
         constraints=None,
     )
