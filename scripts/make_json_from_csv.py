@@ -5,7 +5,7 @@ Local database is built from ~/scripts/setup_vhh_db.sh
 
 Example:
     python3 scripts/make_json_from_csv.py \
-        -f data/01_raw/<experiment_name>/<input_file>.csv \
+        -i data/01_raw/<experiment_name>/<input_file>.csv \
         -o data/02_intermediate/<experiment_name> \
         --target_sequences <target_domain_0> <target_domain_1> [...] <target_domain_n> \
         --oas-db <database_path>/sabdab_nano_db \
@@ -29,15 +29,15 @@ from tqdm.auto import tqdm
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('-f', '--input_file', type=Path, required=True)
+    parser.add_argument('-i', '--input_file', type=Path, required=True)
     parser.add_argument('-o', '--output_dir', type=Path, required=True)
     parser.add_argument('-t', '--target_sequences', type=str, nargs='+', default=None)
     parser.add_argument('-s', '--seeds', type=int, nargs='+')
     parser.add_argument('-n', '--name', type = str, required=False, default=None, help='Custom sample name')
     parser.add_argument('-r', '--rows', type=int, default=[0, 10], nargs=2,
                         metavar=('START', 'END'))
-    parser.add_argument('--oas-db', type=str,
-                        default='/data/databases/oas_nano/oas_nano_db',
+    parser.add_argument('--sabdab-db', type=str,
+                        default='~/search_database/sabdab_nano/sabdab_nano_db',
                         help='Path to MMseqs2 OAS nanobody database')
     parser.add_argument('--skip-vhh-msa', action='store_true',
                         help='Skip VHH MSA building (fallback to dummy)')
