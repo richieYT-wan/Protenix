@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 from typing import Dict, Tuple, Union, List, Any
-
+import re
 import numpy as np
 import torch
 from biotite.structure import AtomArray, get_residue_starts
@@ -26,6 +26,10 @@ from biotite.structure import AtomArray, get_residue_starts
 
 NUC_RESIDUE_SET = {"DA", "DC", "DT", "DG", "A", "C", "U", "G"}
 
+def _match_chain_mask(chains_np: np.ndarray, chain_spec: str) -> np.ndarray:
+    """Match exact `chain_spec` or `<chain_spec><digits>` (e.g. T, T0, T1, ...)."""
+    pattern = re.compile(rf"^{re.escape(chain_spec)}\d*$")
+    return np.array([bool(pattern.match(str(c))) for c in chains_np], dtype=bool)
 
 def _as_tensor(x, dtype=None, device=None) -> torch.Tensor:
     """Cast numpy/tensor input to torch.Tensor (handles bfloat16 -> float32)."""
@@ -199,7 +203,7 @@ class IPSAECalculator:
             distances = torch.cdist(coords.unsqueeze(0), coords.unsqueeze(0)).squeeze(0)
 
             # ----- chain index tensors -----
-            c1_mask_np = (chains_np == target_chain)
+            c1_mask_np = _match_chain_mask(chains_np, target_chain)
             c2_mask_np = (chains_np == binder_chain)
             if not c1_mask_np.any() or not c2_mask_np.any():
                 return self._empty_result()
