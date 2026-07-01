@@ -311,16 +311,27 @@ class IPSAECalculator:
             print(f"  [ERROR] Failed to compute IPSAE metrics: {e}")
             return self._empty_result()
 
-    def compute(self, atom_array, pred_dict, binder_chain="H", target_chain="T") -> List[Dict]:
-        """Returns a list of ipSAE results, one per sample."""
-        results = []
-        for _pdict in pred_dict['full_data']:
-            results.append(self._compute(atom_array, pae_matrix=_pdict['token_pair_pae'],
-                          plddt_vector=_pdict['atom_plddt'],
-                          atom_to_token_idx=_pdict['atom_to_token_idx'],
-                          pred_coordinates= _pdict['atom_coordinate'],
-                          binder_chain=binder_chain, target_chain=target_chain))
-        return results
+    def compute_update_confidence(self, atom_array, pred_dict, binder_chain="H", target_chain="T") -> List[Dict]:
+        """Computes ipSAE results and updates the sample confidence, one per sample."""
+        for _pdict, conf in zip(pred_dict['full_data'], pred_dict['summary_confidence']):
+            res = self._compute(atom_array, pae_matrix=_pdict['token_pair_pae'],
+                                plddt_vector=_pdict['atom_plddt'],
+                                atom_to_token_idx=_pdict['atom_to_token_idx'],
+                                pred_coordinates= _pdict['atom_coordinate'],
+                                binder_chain=binder_chain, target_chain=target_chain)
+            conf.update(res)
+
+
+    # def compute(self, atom_array, pred_dict, binder_chain="H", target_chain="T") -> List[Dict]:
+    #     """Returns a list of ipSAE results, one per sample."""
+    #     results = []
+    #     for _pdict in pred_dict['full_data']:
+    #         results.append(self._compute(atom_array, pae_matrix=_pdict['token_pair_pae'],
+    #                       plddt_vector=_pdict['atom_plddt'],
+    #                       atom_to_token_idx=_pdict['atom_to_token_idx'],
+    #                       pred_coordinates= _pdict['atom_coordinate'],
+    #                       binder_chain=binder_chain, target_chain=target_chain))
+    #     return results
 
     @staticmethod
     def _empty_result() -> Dict[str, float]:

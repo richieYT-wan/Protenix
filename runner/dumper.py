@@ -159,10 +159,10 @@ class DataDumper:
             b_factor=b_factor,
         )
         # Here add dump to save the PAE / PLDDT / PAE vectors?
-        self._save_metrics(pred_dict['full_data'], prediction_save_dir=prediction_save_dir,
-                           sample_name=pdb_id, sorted_indices=sorted_indices)
+        # self._save_metrics(pred_dict['full_data'], prediction_save_dir=prediction_save_dir,
+        #                    sample_name=pdb_id, sorted_indices=sorted_indices)
+        #
         # Dump confidence
-        # TODO: Here update _save_confidence to include new fields like ipsae etc?
         self._save_confidence(
             data=pred_dict,
             prediction_save_dir=prediction_save_dir,
@@ -176,14 +176,16 @@ class DataDumper:
                       sample_name: str,
                       sorted_indices: Optional[List[int]],
                       ):
-        if sorted_indices is None:
-            sorted_indices = list(range(len(predicted_metrics)))
-        for idx, rank in enumerate(sorted_indices):
-            basename = f'{sample_name}_sample_{rank}_'
-            torch.save(predicted_metrics[idx]['atom_plddt'], os.path.join(prediction_save_dir, f'{basename}atom_plddt.pt'))
-            torch.save(predicted_metrics[idx]['token_pair_pde'], os.path.join(prediction_save_dir, f'{basename}token_pair_pde.pt'))
-            torch.save(predicted_metrics[idx]['token_pair_pae'], os.path.join(prediction_save_dir, f'{basename}token_pair_pae.pt'))
-            torch.save(predicted_metrics[idx]['atom_to_token_idx'], os.path.join(prediction_save_dir, f'{basename}atom_to_token_idx.pt'))
+        pass
+        #TODO:  OLD save for logging tensors for debugging // to be phased-out
+        # if sorted_indices is None:
+        #     sorted_indices = list(range(len(predicted_metrics)))
+        # for idx, rank in enumerate(sorted_indices):
+        #     basename = f'{sample_name}_sample_{rank}_'
+        #     torch.save(predicted_metrics[idx]['atom_plddt'], os.path.join(prediction_save_dir, f'{basename}atom_plddt.pt'))
+        #     torch.save(predicted_metrics[idx]['token_pair_pde'], os.path.join(prediction_save_dir, f'{basename}token_pair_pde.pt'))
+        #     torch.save(predicted_metrics[idx]['token_pair_pae'], os.path.join(prediction_save_dir, f'{basename}token_pair_pae.pt'))
+        #     torch.save(predicted_metrics[idx]['atom_to_token_idx'], os.path.join(prediction_save_dir, f'{basename}atom_to_token_idx.pt'))
 
     def _save_structure(
         self,

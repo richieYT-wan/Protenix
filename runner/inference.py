@@ -670,7 +670,12 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                 }
                 # dump for each (seed, pred_dict) pair.
                 for s_seed, pred in seed_predictions:
-                    ipsae_calculator.compute(atom_array, pred, binder_chain='H', target_chain='T')
+                    # ipsae_results = ipsae_calculator.compute(atom_array, pred, binder_chain='H', target_chain='T')
+                    # for conf, res in zip(sliced_pred['summary_confidence'], ipsae_results):
+                    #     conf.update(res)
+                        
+                    ipsae_calculator.compute_update_confidence(atom_array, pred, binder_chain='H', target_chain='T')
+
                     runner.dumper.dump(
                         dataset_name="",
                         pdb_id=sample_name,
