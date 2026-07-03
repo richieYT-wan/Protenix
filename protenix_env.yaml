@@ -1,6 +1,6 @@
 # Conda environment for running Protenix pipeline
 
-name: protenix
+name: protenix_test
 
 channels:
   - pyg
@@ -20,12 +20,12 @@ dependencies:
   - frozendict
   # --- Bioinformatics & Cheminformatics ---
   - biopython
+  - biotite
   - py3dmol
   - freesasa
   - mmseqs2
   - hmmer
   - anarci
-  - abnumber # used to number CDR / framework regions
   - tmtools # Used for TM score / RMSD and alignment and other utils
   - pymol-open-source # For alignment and RMSD and other utils
   - tqdm 
@@ -33,6 +33,8 @@ dependencies:
   # --- Pip-installed packages ---
   - pip:
     - colabfold[alphafold]
-    - --index-url https://pypi.org/simple
     - protenix
-    - torch
+    - abnumber
+    - "-e git+ssh://git@github.com/servier-github/ab-develop.git@develop#subdirectory=projects/uc_denovo_vhh/foldlab&egg=foldlab"
+
+

@@ -639,7 +639,7 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                                 for k, v in prediction.items()
                             }
                             seed_predictions.append((s_seed, sliced_pred))
-                    except torch.cuda.OutOfMemoryError:
+                    except torch.cuda.OutOfMemoryError or torch.OutOfMemoryError:
                         logger.warning(
                             f"Batched seed inference OOM for {sample_name}, "
                             f"falling back to sequential seeds"

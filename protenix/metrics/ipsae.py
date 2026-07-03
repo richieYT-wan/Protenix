@@ -168,8 +168,11 @@ class IPSAECalculator:
                 pae = pae.to(torch.float32)
             if pae.ndim == 3 and pae.shape[0] == 1:
                 pae = pae[0]
-            pae = pae.to(torch.float32)
-            device = pae.device
+
+            # Test: Pass everything to CPU due to CUDA memory constraints
+            device = 'cpu'
+            pae = pae.to(torch.float32).to(device)
+            # device = pae.device
             dtype = pae.dtype
 
             plddt = _as_tensor(plddt_vector, dtype=dtype, device=device)
@@ -325,17 +328,6 @@ class IPSAECalculator:
                                 binder_chain=binder_chain, target_chain=target_chain)
             conf.update(res)
 
-
-    # def compute(self, atom_array, pred_dict, binder_chain="H", target_chain="T") -> List[Dict]:
-    #     """Returns a list of ipSAE results, one per sample."""
-    #     results = []
-    #     for _pdict in pred_dict['full_data']:
-    #         results.append(self._compute(atom_array, pae_matrix=_pdict['token_pair_pae'],
-    #                       plddt_vector=_pdict['atom_plddt'],
-    #                       atom_to_token_idx=_pdict['atom_to_token_idx'],
-    #                       pred_coordinates= _pdict['atom_coordinate'],
-    #                       binder_chain=binder_chain, target_chain=target_chain))
-    #     return results
 
     @staticmethod
     def _empty_result() -> Dict[str, float]:

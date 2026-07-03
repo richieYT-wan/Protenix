@@ -259,8 +259,9 @@ def main():
         df['seq_id'] = [f'{Path(args.input_file).stem}_id_{i:06}' for i in range(len(df))]
 
     use_real_msa = not args.skip_vhh_msa
-    if use_real_msa and not Path(args.sabdab_db + ".dbtype").exists():
-        print(f"[warn] OAS DB not found at {args.sabdab_db}, falling back to dummy MSAs")
+    sabdab_db = str(Path(args.sabdab_db).expanduser().absolute())
+    if use_real_msa and not Path(sabdab_db + ".dbtype").exists():
+        print(f"[warn] DB not found at {args.sabdab_db}, falling back to dummy MSAs")
         use_real_msa = False
 
     wrapper = partial(
@@ -268,7 +269,7 @@ def main():
         target_json=target_json,
         seeds=args.seeds,
         msa_dir=vhh_msa_dir,
-        sabdab_db=args.sabdab_db,
+        sabdab_db=sabdab_db,
         use_real_msa=use_real_msa,
         constraints=None,
     )
