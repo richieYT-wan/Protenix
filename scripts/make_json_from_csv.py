@@ -11,18 +11,17 @@ Example:
         --oas-db <database_path>/sabdab_nano_db \
         -s 0 13 30 42 1213 -r 0 100
 """
+import argparse
 import hashlib
 import json
 import subprocess
 import tempfile
-
+import shutil
 from pathlib import Path
 from argparse import ArgumentParser
 from functools import partial
 from multiprocessing import Pool
-
 from typing import Dict, List, Tuple, Union
-
 import pandas as pd
 from tqdm.auto import tqdm
 
@@ -31,21 +30,67 @@ def parse_args():
     parser = ArgumentParser()
     parser.add_argument('-i', '--input_file', type=Path, required=True)
     parser.add_argument('-o', '--output_dir', type=Path, required=True)
+    parser.add_argument('--output_json', type=Path, default=None, help='Custom JSON basename, without full path or extension.'
+                                                                       'Ex: --output_json <customfilename> will save the prepared input at'
+                                                                       '<output_dir>/<customefilename>.json')
     parser.add_argument('-t', '--target_sequences', type=str, nargs='+', default=None)
     parser.add_argument('-s', '--seeds', type=int, nargs='+')
     parser.add_argument('-n', '--name', type = str, required=False, default=None, help='Custom sample name')
     parser.add_argument('-r', '--rows', type=int, default=[0, 10], nargs=2,
                         metavar=('START', 'END'))
-    parser.add_argument('--sabdab-db', type=str,
+    parser.add_argument('--sabdab_db', type=str,
                         default='~/search_database/sabdab_nano/sabdab_nano_db',
                         help='Path to MMseqs2 OAS nanobody database')
-    parser.add_argument('--skip-vhh-msa', action='store_true',
+    parser.add_argument('--skip_vhh_msa', action='store_true',
                         help='Skip VHH MSA building (fallback to dummy)')
-    parser.add_argument('--n-jobs', type=int, default=16)
+    parser.add_argument('--force_refresh_target', action='store_true',
+                        help='Ignore cached target MSA and re-run search')
+    parser.add_argument('--n_jobs', type=int, default=16)
     return parser.parse_args()
 
 
-from typing import Tuple
+def _target_fingerprint(target: Union[List, str]) -> str:
+    """Deterministic hash of the target sequence(s) for cache invalidation."""
+    if isinstance(target, list):
+        payload = "|".join(target)
+    else:
+        payload = target
+    return hashlib.md5(payload.encode()).hexdigest()
+
+
+def process_target_msa_template(target: Union[List, str], output_dir: Path) -> Dict:
+    """Run protenix mt on the target to get its MSA + templates. Runs once."""
+    protein_chains = []
+    if isinstance(target, list):
+        for i, t in enumerate(target):
+            protein_chains.append(make_protein_chain(t, f'T{i}', 1))
+    else:
+        protein_chains.append(make_protein_chain(target, 'T', 1))
+
+    entry = [make_entry(protein_chains, 'target')]
+    with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as tmp:
+        json.dump(entry, tmp, indent=2)
+        tmp_path = Path(tmp.name)
+
+    target_intermediate_dir = Path(output_dir) / 'target'
+
+    try:
+        subprocess.run(
+            ["protenix", "mt", "-i", str(tmp_path), "-o", str(output_dir)],
+            text=True, check=True
+        )
+    except subprocess.CalledProcessError:
+        # Clean up so the next run doesn't reuse a half-baked MSA/template dir
+        if target_intermediate_dir.exists():
+            print(f"[warn] protenix mt failed; removing partial output at "
+                  f"{target_intermediate_dir}")
+            shutil.rmtree(target_intermediate_dir)
+        raise
+
+    target_file = tmp_path.parent / (tmp_path.stem + '-final-updated.json')
+    with open(target_file) as f:
+        return json.load(f)
+
 
 def build_vhh_msa(
     sequence: str,
@@ -105,6 +150,7 @@ def build_vhh_msa(
     return paired_path, unpaired_path
 
 def find_target_col(df: pd.DataFrame, candidates: List[str] = None):
+
     if candidates is None:
         candidates = ['target', 'target_seq', 'target_sequence', 'sequence',
                       'seq', 'protein_seq', 'protein_sequence', 'amino_acid',
@@ -119,30 +165,6 @@ def find_target_col(df: pd.DataFrame, candidates: List[str] = None):
         if matches:
             return matches[0]
     raise ValueError(f"No target column found in {list(df.columns)}")
-
-
-def process_target_msa_template(target: Union[List, str], output_dir: Path) -> Dict:
-    """Run protenix mt on the target to get its MSA + templates. Runs once."""
-    protein_chains = []
-    if isinstance(target, list):
-        for i, t in enumerate(target):
-            protein_chains.append(make_protein_chain(t, f'T{i}', 1))
-    else:
-        protein_chains.append(make_protein_chain(target, 'T', 1))
-
-    entry = [make_entry(protein_chains, 'target')]
-    with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as tmp:
-        json.dump(entry, tmp, indent=2)
-        tmp_path = Path(tmp.name)
-
-    subprocess.run(
-        ["protenix", "mt", "-i", str(tmp_path), "-o", str(output_dir)],
-        text=True, check=True
-    )
-
-    target_file = tmp_path.parent / (tmp_path.stem + '-final-updated.json')
-    with open(target_file) as f:
-        return json.load(f)
 
 
 def make_dummy_msa(sequence: str, name: str, msa_dir: Path) -> Tuple[Path, Path]:
@@ -226,28 +248,65 @@ def main():
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / (Path(args.input_file).stem + '.json')
+    if args.output_json:
+        out_file = out_dir / (Path(args.output_json).stem + '.json')
+    else:
+        out_file = out_dir / (Path(args.input_file).stem + '.json')
     vhh_msa_dir = out_dir / 'vh_msa'
 
-    ###################################################
+    ###############################################
     #    Processing target for MSA/template search    #
-    #    (runs exactly once)                          #
+    #    (runs exactly once, unless target changed    #
+    #    or previous run failed)                      #
     ###################################################
+
     target_json_path = out_dir / 'target_msa_cached.json'
-    if target_json_path.exists():
+    target_fp_path = out_dir / 'target_msa_cached.fingerprint'
+    target_intermediate_dir = out_dir / 'target'
+
+    if args.force_refresh_target:
+        for p in (target_json_path, target_fp_path):
+            if p.exists(): p.unlink()
+        if target_intermediate_dir.exists():
+            shutil.rmtree(target_intermediate_dir)
+
+    # Resolve target (needed for fingerprint check)
+    if args.target_sequences is None:
+        target_col = find_target_col(df)
+        target = df[target_col].unique()[0]
+    else:
+        target = args.target_sequences
+    current_fp = _target_fingerprint(target)
+
+    # Determine cache validity
+    cache_valid = False
+    if target_json_path.exists() and target_fp_path.exists():
+        cached_fp = target_fp_path.read_text().strip()
+        if cached_fp == current_fp:
+            cache_valid = True
+        else:
+            print(f"[info] Target changed since last cache "
+                  f"({cached_fp[:8]} → {current_fp[:8]}); invalidating.")
+
+    # Detect leftover partial state from a previous failed run
+    if not cache_valid and target_intermediate_dir.exists():
+        print(f"[warn] Found stale intermediate dir {target_intermediate_dir} "
+              f"from a previous failed run; removing.")
+        shutil.rmtree(target_intermediate_dir)
+    # Also drop a mismatched cache file
+    if not cache_valid and target_json_path.exists():
+        target_json_path.unlink()
+
+    if cache_valid:
         print(f"[info] Loading cached target MSA from {target_json_path}")
         with open(target_json_path) as f:
             target_json = json.load(f)
     else:
-        if args.target_sequences is None:
-            target_col = find_target_col(df)
-            target = df[target_col].unique()[0]
-        else:
-            target = args.target_sequences
         print(f"[info] Running target MSA/template search...")
         target_json = process_target_msa_template(target, out_dir)
         with open(target_json_path, 'w') as f:
             json.dump(target_json, f, indent=2)
+        target_fp_path.write_text(current_fp)
         print(f"[info] Cached target MSA at {target_json_path}")
 
     ###################################################
