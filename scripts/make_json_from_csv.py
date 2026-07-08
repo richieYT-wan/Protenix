@@ -75,8 +75,10 @@ def process_target_msa_template(target: Union[List, str], output_dir: Path) -> D
     target_intermediate_dir = Path(output_dir) / 'target'
 
     try:
+        cmd = ["protenix", "mt", "-m", "colabfold", "-i", str(tmp_path), "-o", str(output_dir)]
+        print(f'Running: {" ".join(cmd)}')
         subprocess.run(
-            ["protenix", "mt", "-m", "colabfold", "-i", str(tmp_path), "-o", str(output_dir)],
+            cmd,
             text=True, check=True
         )
     except subprocess.CalledProcessError:
