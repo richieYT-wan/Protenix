@@ -59,7 +59,7 @@ def build_prepare_cmd(config, args, script_dir):
     name = config['prepare'].get('name')
     if name:
         cmd.extend(['-n', name])
-    print(f'Running input preparation with command: {" ".join(cmd)}')
+    print('\n','*'*100,'\n',f'Running input preparation with command: {" ".join(cmd)}''*'*100,'\n')
     return cmd
 
 def build_predict_cmd(config, args, script_dir):
@@ -70,7 +70,7 @@ def build_predict_cmd(config, args, script_dir):
            '--use_seeds_in_json', 'True']
     model = config['predict'].get("model", 'protenix-v2')
     cmd.extend(['-n', model])
-    print(f'Running batch_inference with command: {" ".join(cmd)}')
+    print('\n','*'*100,'\n',f'Running batch inference with command: {" ".join(cmd)}''*'*100,'\n')
     return cmd
 
 def build_parse_cmd(args, script_dir):
@@ -78,7 +78,7 @@ def build_parse_cmd(args, script_dir):
     cmd = ['python', str(script_dir / 'parse_outputs.py'),
            '-i', str(args.output_dir / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs'),
            '--n_jobs', str(args.n_jobs)]
-    print(f'Running output parsing with command: {" ".join(cmd)}')
+    print('\n','*'*100,'\n',f'Running output parsing with command: {" ".join(cmd)}''*'*100,'\n')
     return cmd
 
 def main():
