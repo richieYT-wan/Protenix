@@ -216,7 +216,7 @@ def run_mmseqs2_service(
                 # Resubmit job until it goes through
                 out = submit(seqs_unique, mode, N)
                 while out["status"] in ["UNKNOWN", "RATELIMIT"]:
-                    sleep_time = 15
+                    sleep_time = 30
                     logger.error(f"Sleeping for {sleep_time}s. Reason: {out['status']}")
                     # resubmit
                     time.sleep(sleep_time)
@@ -236,7 +236,7 @@ def run_mmseqs2_service(
                 ID, TIME = out["id"], 0
                 pbar.set_description(out["status"])
                 while out["status"] in ["UNKNOWN", "RUNNING", "PENDING"]:
-                    t = 60
+                    t = 30
                     logger.error(f"Sleeping for {t}s. Reason: {out['status']}")
                     time.sleep(t)
                     out = status(ID)

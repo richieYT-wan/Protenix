@@ -76,7 +76,7 @@ def process_target_msa_template(target: Union[List, str], output_dir: Path) -> D
 
     try:
         subprocess.run(
-            ["protenix", "mt", "-i", str(tmp_path), "-o", str(output_dir)],
+            ["protenix", "mt", "-m", "colabfold", "-i", str(tmp_path), "-o", str(output_dir)],
             text=True, check=True
         )
     except subprocess.CalledProcessError:
