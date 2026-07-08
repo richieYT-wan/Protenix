@@ -66,7 +66,7 @@ def build_predict_cmd(config, args, script_dir):
     # Assumes these scripts to be in the same directory as run.py itself
     cmd = ['python', str(script_dir.parent / 'runner' / 'batch_inference.py'),
            '-i', str(Path(args.output_dir) / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}.json'),
-           '-o', str(args.output_dir),
+           '-o', str(args.output_dir / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs'),
            '--use_seeds_in_json', 'True']
     model = config['predict'].get("model", 'protenix-v2')
     cmd.extend(['-n', model])
