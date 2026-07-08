@@ -76,7 +76,7 @@ def build_predict_cmd(config, args, script_dir):
 def build_parse_cmd(args, script_dir):
     # Assumes these scripts to be in the same directory as run.py itself
     cmd = ['python', str(script_dir / 'parse_outputs.py'),
-           '-i', str(args.output_dir),
+           '-i', str(args.output_dir / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs'),
            '--n_jobs', str(args.n_jobs)]
     print(f'Running output parsing with command: {" ".join(cmd)}')
     return cmd
