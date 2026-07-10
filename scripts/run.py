@@ -13,15 +13,26 @@
         <parse_keys> : <parse_values>
     Some arguments are built into the config for traceability and others are built into the argument parser for
     ease of use (e.g. for snakemake pipelines such as sabdab-db which needs to be pulled from GCS))
+
+    Builds a single output directory into the specified `output_dir`, and creates within:
+        - target MSA directory
+        - target MSA cache / fingerprint (for re-runs // sharing target MSA across runs)
+        - VH MSA directory
+        - prepared input JSONs based on selected rows
+        - individual timestamped and hashed output subdirectories for the structure predictions of each JSONs subfiles
+        - parsed and aggregated outputs within output subdirectories
 """
 
-import os, sys
+import logging
 import subprocess
 from argparse import ArgumentParser
 from pathlib import Path
 from yaml import load as load_yaml, Loader
-from typing import List, Dict, Tuple
+from typing import Dict
+from datetime import datetime as dt
+from hashlib import md5
 
+logger = logging.getLogger(__name__)
 
 def parse_args():
     p = ArgumentParser(description="""Full Protenix pipeline wrapper from reading a CSV file containing vh sequences,  
@@ -42,7 +53,21 @@ def parse_args():
     return p.parse_args()
 
 
+
+def build_timestamped_hashed_outdir(args):
+    timestamp = dt.now().strftime("%y%m%d_%H%M")
+    hashed = md5(timestamp.encode()).hexdigest()[:8]
+    child = f'{timestamp}_{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs_{hashed}'
+    return str(args.output_dir / child)
+
+
 def build_prepare_cmd(config, args, script_dir):
+    """
+    The output_dir here is shared across different runs to allow easy access and re-use of target MSAs
+    in the -o flag (uses str(args.output_dir))
+    In the predict cmd script, the predictions output subdirectory will be timestamped and hashed for traceability
+
+    """
     # Assumes these scripts to be in the same directory as run.py itself
     cmd = ['python', str(script_dir / 'make_json_from_csv.py'),
            '-i', str(args.input_file),
@@ -59,36 +84,42 @@ def build_prepare_cmd(config, args, script_dir):
     name = config['prepare'].get('name')
     if name:
         cmd.extend(['-n', name])
-    print('\n','*'*100,'\n',f'Running input preparation with command: {" ".join(cmd)}', '\n', '*'*100,'\n')
+    logger.info('\n','*'*100,'\n',f'Running input preparation with command: {" ".join(cmd)}', '\n', '*'*100,'\n')
     return cmd
 
-def build_predict_cmd(config, args, script_dir):
+
+def build_predict_cmd(config, args, script_dir, output_subdir):
+    #
     # Assumes these scripts to be in the same directory as run.py itself
     cmd = ['python', str(script_dir.parent / 'runner' / 'batch_inference.py'),
            '-i', str(Path(args.output_dir) / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}.json'),
-           '-o', str(args.output_dir / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs'),
+           '-o', output_subdir,
            '--use_seeds_in_json', 'True']
     model = config['predict'].get("model", 'protenix-v2')
     cmd.extend(['-n', model])
-    print('\n','*'*100,'\n',f'Running batch inference with command: {" ".join(cmd)}', '\n', '*'*100,'\n')
+    logger.info('\n','*'*100,'\n',f'Running batch inference with command: {" ".join(cmd)}', '\n', '*'*100,'\n')
     return cmd
 
-def build_parse_cmd(args, script_dir):
+def build_parse_cmd(args, script_dir, output_subdir):
     # Assumes these scripts to be in the same directory as run.py itself
     cmd = ['python', str(script_dir / 'parse_outputs.py'),
-           '-i', str(args.output_dir / f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs'),
+           '-i', output_subdir,
            '--n_jobs', str(args.n_jobs)]
-    print('\n','*'*100,'\n',f'Running output parsing with command: {" ".join(cmd)}', '\n', '*'*100,'\n')
+    logger.info('\n','*'*100,'\n',f'Running output parsing with command: {" ".join(cmd)}', '\n', '*'*100,'\n')
     return cmd
+
+
 
 def main():
     args = parse_args()
     with open(args.config_file, 'r') as f:
         config: Dict = load_yaml(f, Loader)
     script_dir = Path(__file__).parent
+    # Build timestamped hashed output dir
+    output_subdir = build_timestamped_hashed_outdir(args)
     subprocess.run(build_prepare_cmd(config, args, script_dir), check=True)
-    subprocess.run(build_predict_cmd(config, args, script_dir), check=True)
-    subprocess.run(build_parse_cmd(args, script_dir), check=True)
+    subprocess.run(build_predict_cmd(config, args, script_dir, output_subdir), check=True)
+    subprocess.run(build_parse_cmd(args, script_dir, output_subdir), check=True)
 
 if __name__ == '__main__':
     main()

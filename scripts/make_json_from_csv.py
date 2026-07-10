@@ -11,8 +11,9 @@ Example:
         --oas-db <database_path>/sabdab_nano_db \
         -s 0 13 30 42 1213 -r 0 100
 """
-import argparse
+
 import hashlib
+import logging
 import json
 import subprocess
 import tempfile
@@ -25,6 +26,7 @@ from typing import Dict, List, Tuple, Union
 import pandas as pd
 from tqdm.auto import tqdm
 
+logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = ArgumentParser()
@@ -76,7 +78,7 @@ def process_target_msa_template(target: Union[List, str], output_dir: Path) -> D
 
     try:
         cmd = ["protenix", "mt", "-i", str(tmp_path), "-o", str(output_dir)]
-        print(f'Running: {" ".join(cmd)}')
+        logger.info(f'Running: {" ".join(cmd)}')
         subprocess.run(
             cmd,
             text=True, check=True
@@ -84,7 +86,7 @@ def process_target_msa_template(target: Union[List, str], output_dir: Path) -> D
     except subprocess.CalledProcessError:
         # Clean up so the next run doesn't reuse a half-baked MSA/template dir
         if target_intermediate_dir.exists():
-            print(f"[warn] protenix mt failed; removing partial output at "
+            logger.warning(" protenix mt failed; removing partial output at "
                   f"{target_intermediate_dir}")
             shutil.rmtree(target_intermediate_dir)
         raise
@@ -209,7 +211,7 @@ def make_entry_from_row(vh: str, target_json: Dict, name: str, msa_dir: Path,
                 sequence=vh, name=name, output_dir=msa_dir, sabdab_db=sabdab_db
             )
         except Exception as e:
-            print(f"[warn] Real MSA failed for {name} ({e}), falling back to dummy")
+            logger.warning(" Real MSA failed for {name} ({e}), falling back to dummy")
             pairing_path, nonpairing_path = make_dummy_msa(vh, name, msa_dir)
     else:
         pairing_path, nonpairing_path = make_dummy_msa(vh, name, msa_dir)
@@ -287,12 +289,12 @@ def main():
         if cached_fp == current_fp:
             cache_valid = True
         else:
-            print(f"[info] Target changed since last cache "
+            logger.info("Target changed since last cache "
                   f"({cached_fp[:8]} → {current_fp[:8]}); invalidating.")
 
     # Detect leftover partial state from a previous failed run
     if not cache_valid and target_intermediate_dir.exists():
-        print(f"[warn] Found stale intermediate dir {target_intermediate_dir} "
+        logger.warning(" Found stale intermediate dir {target_intermediate_dir} "
               f"from a previous failed run; removing.")
         shutil.rmtree(target_intermediate_dir)
     # Also drop a mismatched cache file
@@ -300,16 +302,16 @@ def main():
         target_json_path.unlink()
 
     if cache_valid:
-        print(f"[info] Loading cached target MSA from {target_json_path}")
+        logger.info("Loading cached target MSA from {target_json_path}")
         with open(target_json_path) as f:
             target_json = json.load(f)
     else:
-        print(f"[info] Running target MSA/template search...")
+        logger.info("Running target MSA/template search...")
         target_json = process_target_msa_template(target, out_dir)
         with open(target_json_path, 'w') as f:
             json.dump(target_json, f, indent=2)
         target_fp_path.write_text(current_fp)
-        print(f"[info] Cached target MSA at {target_json_path}")
+        logger.info("Cached target MSA at {target_json_path}")
 
     ###################################################
     #      Processing VHH + target for final JSON     #
@@ -322,7 +324,7 @@ def main():
     use_real_msa = not args.skip_vhh_msa
     sabdab_db = str(Path(args.sabdab_db).expanduser().absolute())
     if use_real_msa and not Path(sabdab_db + ".dbtype").exists():
-        print(f"[warn] DB not found at {args.sabdab_db}, falling back to dummy MSAs")
+        logger.warning(" DB not found at {args.sabdab_db}, falling back to dummy MSAs")
         use_real_msa = False
 
     wrapper = partial(
@@ -340,7 +342,7 @@ def main():
     # NB: MMseqs2 is multi-threaded internally; using many parallel processes
     # that each call mmseqs can over-subscribe CPUs. Lower n_jobs if so.
     n_jobs = args.n_jobs if not use_real_msa else max(1, args.n_jobs // 4)
-    print(f"[info] Building {len(rows)} entries with {n_jobs} workers "
+    logger.info("Building {len(rows)} entries with {n_jobs} workers "
           f"(real MSAs: {use_real_msa})")
 
     with Pool(n_jobs) as p:
@@ -348,7 +350,7 @@ def main():
 
     with open(out_file, 'w') as file:
         json.dump(entries, file, indent=2)
-    print(f"[info] Wrote {len(entries)} entries to {out_file}")
+    logger.info("Wrote {len(entries)} entries to {out_file}")
 
 
 if __name__ == '__main__':

@@ -692,6 +692,11 @@ def infer_predict(runner: InferenceRunner, configs: Any) -> None:
                     f"succeeded. Model forward time: {t2_end - t2_start:.2f}s. "
                     f"Results saved to {configs.dump_dir}"
                 )
+
+                # reset batched_seeds to True after failure (e.g. we try again for next batch)
+                if not batched_seeds:
+                    batched_seeds = True
+
             except Exception as e:
                 error_message = (
                     f"[Rank {DIST_WRAPPER.rank}] {sample_name} failed: {e}\n"
