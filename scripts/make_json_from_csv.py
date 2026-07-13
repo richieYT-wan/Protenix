@@ -38,8 +38,11 @@ def parse_args():
     parser.add_argument('-t', '--target_sequences', type=str, nargs='+', default=None)
     parser.add_argument('-s', '--seeds', type=int, nargs='+')
     parser.add_argument('-n', '--name', type = str, required=False, default=None, help='Custom sample name')
-    parser.add_argument('-r', '--rows', type=int, default=[0, 10], nargs=2,
+    parser.add_argument('-r', '--rows', type=int, default=[None, None], nargs=2,
                         metavar=('START', 'END'))
+    parser.add_argument('--subset', type=str, default = (None, None), nargs=2,
+                        metavar=('COLUMN', 'VALUE'), help='A tuple pair of (column,value) for querying a subset of the dataframe. '
+                                                          'Example: --subset target_label IL2Rgamma will do `input_df.query("target_label==\'IL2Rgamma\'")')
     parser.add_argument('--sabdab_db', type=str,
                         default='~/search_database/sabdab_nano/sabdab_nano_db',
                         help='Path to MMseqs2 OAS nanobody database')
@@ -164,10 +167,6 @@ def find_target_col(df: pd.DataFrame, candidates: List[str] = None):
         matches = [col for col, cl in zip(df.columns, cols_lower) if cl == c]
         if matches:
             return matches[0]
-    for c in candidates:
-        matches = [col for col, cl in zip(df.columns, cols_lower) if c in cl]
-        if matches:
-            return matches[0]
     raise ValueError(f"No target column found in {list(df.columns)}")
 
 
@@ -246,10 +245,17 @@ def generate_fablab_hash(sequence, length=12):
 
 def main():
     args = parse_args()
-    start, end = args.rows
+    # input slicing/subsetting
     df = pd.read_csv(args.input_file)
-    df = df.iloc[max(start, 0):min(len(df), end)]
+    # Query subset, then parse start-end based on the subset
+    if args.subset[0] and args.subset[1]:
+        df = df.query(f'{args.subset[0]}=="{args.subset[1]}"')
 
+    start, end = args.rows
+    if start and end:
+        df = df.iloc[max(start, 0):min(len(df), end)]
+
+    # Prepare outfiles
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if args.output_json:
@@ -258,15 +264,16 @@ def main():
         out_file = out_dir / (Path(args.input_file).stem + '.json')
     vhh_msa_dir = out_dir / 'vh_msa'
 
+    target_json_path = out_dir / 'target_msa_cached.json'
+    target_fp_path = out_dir / 'target_msa_cached.fingerprint'
+    target_intermediate_dir = out_dir / 'target'
+
     ###############################################
     #    Processing target for MSA/template search    #
     #    (runs exactly once, unless target changed    #
     #    or previous run failed)                      #
     ###################################################
 
-    target_json_path = out_dir / 'target_msa_cached.json'
-    target_fp_path = out_dir / 'target_msa_cached.fingerprint'
-    target_intermediate_dir = out_dir / 'target'
 
     if args.force_refresh_target:
         for p in (target_json_path, target_fp_path):
