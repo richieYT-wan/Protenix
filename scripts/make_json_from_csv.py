@@ -252,7 +252,7 @@ def main():
         df = df.query(f'{args.subset[0]}=="{args.subset[1]}"')
 
     start, end = args.rows
-    if start and end:
+    if start is not None and end is not None:
         df = df.iloc[max(start, 0):min(len(df), end)]
 
     # Prepare outfiles

@@ -52,15 +52,14 @@ def parse_args():
     p.add_argument('--n_jobs', type=int, default=16, help='n_jobs for pre/post processing')
     return p.parse_args()
 
-
 def build_timestamped_hashed_outdir_and_json_stem(args):
     timestamp = dt.now().strftime("%y%m%d_%H%M%S[split]%f")
     hashed = md5(timestamp.encode()).hexdigest()[:8]
     timestamp = timestamp.split('[split]')[0]
     start, end = args.rows[0], args.rows[1]
-    if start and end:
-        child = f'{timestamp}_{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}_outputs_{hashed}'
-        json_stem = f'{Path(args.input_file).stem}_rows_{args.rows[0]:04}_{args.rows[1]:04}'
+    if start is not None and end is not None:     
+        child = f'{timestamp}_{Path(args.input_file).stem}_rows_{start:04}_{end:04}_outputs_{hashed}'
+        json_stem = f'{Path(args.input_file).stem}_rows_{start:04}_{end:04}'
     else:
         child = f'{timestamp}_{Path(args.input_file).stem}_rows_full_dataset_outputs_{hashed}'
         json_stem = f'{Path(args.input_file).stem}_rows_full_dataset'
@@ -81,7 +80,7 @@ def build_prepare_cmd(config, args, script_dir, json_outfile):
            '--output_json', json_outfile,
            '--n_jobs', str(args.n_jobs),
            '--sabdab_db', str(args.sabdab_db)]
-    if args.rows and args.rows[0] and args.rows[1]:
+    if args.rows and args.rows[0] is not None and args.rows[1] is not None:   
         cmd.extend(['-r', str(args.rows[0]), str(args.rows[1])])
     target_sequences = config['prepare'].get('target_sequences')
     if target_sequences:
