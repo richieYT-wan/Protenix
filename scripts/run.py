@@ -50,6 +50,11 @@ def parse_args():
     p.add_argument('-r', '--rows',metavar= ('START', 'END'), type = int, default = [None, None], nargs = 2)
     p.add_argument('--sabdab-db', type=str, default='~/search_database/sabdab_nano/sabdab_nano_db', help='Path to MMseqs2 OAS nanobody database')
     p.add_argument('--n_jobs', type=int, default=16, help='n_jobs for pre/post processing')
+    p.add_argument('--prepare-only', action='store_true',     
+                   help='Only run the prepare step (target MSA + JSON), then exit. '
+                        'Used to pre-warm the target MSA cache before parallel fan-out.')
+    p.add_argument('--skip_vhh_msa', action='store_true',
+                   help='Skip the VHH MSA search in make_json_from_csv subprocess. This strongly negatively affects folding results')
     return p.parse_args()
 
 def build_timestamped_hashed_outdir_and_json_stem(args):
@@ -82,6 +87,8 @@ def build_prepare_cmd(config, args, script_dir, json_outfile):
            '--sabdab_db', str(args.sabdab_db)]
     if args.rows and args.rows[0] is not None and args.rows[1] is not None:   
         cmd.extend(['-r', str(args.rows[0]), str(args.rows[1])])
+    if getattr(args, 'skip_vhh_msa', False):
+        cmd.append('--skip_vhh_msa')
     target_sequences = config['prepare'].get('target_sequences')
     if target_sequences:
         cmd.extend(['-t', target_sequences])
@@ -126,6 +133,9 @@ def main():
     # Build timestamped hashed output dir
     output_subdir, json_stem = build_timestamped_hashed_outdir_and_json_stem(args)
     subprocess.run(build_prepare_cmd(config, args, script_dir, json_stem), check=True)
+    if args.prepare_only:                                            # ← NEW
+        logger.info('--prepare-only set; skipping predict + parse steps.')
+        return
     subprocess.run(build_predict_cmd(config, args, script_dir, output_subdir, json_stem), check=True)
     subprocess.run(build_parse_cmd(args, script_dir, output_subdir), check=True)
 
