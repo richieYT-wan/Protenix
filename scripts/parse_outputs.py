@@ -93,7 +93,6 @@ def build_seq_df(indir: Path, unique_seeds: List[str], n_jobs: int = 16) -> pd.D
 
 
 # ─── Confidence JSON parsing ─────────────────────────────────────────────────
-
 def _load_confidence(path: Path) -> Dict:
     """Load one summary_confidence JSON, keep only scalar/numeric fields."""
     with path.open() as f:
@@ -219,6 +218,15 @@ def main():
     print(f'  {out_dir / "confidence_long.csv"} ({len(long_df)} rows)')
     for name, df in aggs.items():
         print(f'  {out_dir / f"confidence_agg_{name}.csv"} ({len(df)} rows)')
+
+    # Make ONE merged dataframe with --> best_sample as mean (_mean, of N seeds) + best_overall (as _best)
+    # df_best = aggs['best_overall']
+    # df_mean = aggs['best_sample']
+    df_merged = pd.merge(aggs['best_overall'].rename(columns = {k: f'{k}_best' for k in aggs['best_overall'].columns if k not in ['seq_id', 'mab_id', 'vh', 'eval_hash', 'fablab_hash']}),
+                         aggs['best_sample'],
+                         on = ['seq_id', 'mab_id', 'vh', 'eval_hash', 'fablab_hash'])
+    df_merged.to_csv(f'{outdir / "confidence_merged.csv"}', index=False)
+
 
 
 if __name__ == '__main__':
