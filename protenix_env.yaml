@@ -1,6 +1,6 @@
 # Conda environment for running Protenix pipeline
 
-name: protenix_test
+name: protenix
 
 channels:
   - pyg
