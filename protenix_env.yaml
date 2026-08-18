@@ -16,13 +16,13 @@ dependencies:
   - pip
   - pandas
   - gcsfs
+  - fsspec
   - google-cloud-storage
   - frozendict
   # --- Bioinformatics & Cheminformatics ---
   - biopython
   - biotite
   - py3dmol
-  - freesasa
   - mmseqs2
   - hmmer
   - anarci
@@ -35,6 +35,7 @@ dependencies:
     - colabfold[alphafold]
     - protenix
     - abnumber
+    - shape-complementarity
     - "-e git+ssh://git@github.com/servier-github/ab-develop.git@develop#subdirectory=projects/uc_denovo_vhh/foldlab&egg=foldlab"
 
 

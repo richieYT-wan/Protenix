@@ -109,7 +109,7 @@ def build_vhh_msa(
 ) -> Tuple[Path, Path]:
     """
     Run MMseqs2 search of a VHH against OAS, produce paired+unpaired A3M files.
-
+    # TODO Add template search here using custom template search of VHH?
     Returns:
         (paired_msa_path, unpaired_msa_path)
     """
