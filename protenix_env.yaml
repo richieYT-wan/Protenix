@@ -23,8 +23,8 @@ dependencies:
   - biopython
   - biotite
   - py3dmol
-  - mmseqs2
-  - hmmer
+  # Removed mmseqs2 to build specific version directly from source
+  - hmmer 
   - anarci
   - tmtools # Used for TM score / RMSD and alignment and other utils
   - pymol-open-source # For alignment and RMSD and other utils
@@ -36,6 +36,7 @@ dependencies:
     - protenix
     - abnumber
     - shape-complementarity
-    - "-e git+ssh://git@github.com/servier-github/ab-develop.git@develop#subdirectory=projects/uc_denovo_vhh/foldlab&egg=foldlab"
+    # Removed foldlab for now
+    # - "-e git+ssh://git@github.com/servier-github/ab-develop.git@develop#subdirectory=projects/uc_denovo_vhh/foldlab&egg=foldlab"
 
 

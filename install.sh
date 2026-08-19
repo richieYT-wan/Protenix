@@ -1,32 +1,55 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 #
 # Unified installation script for the forked Protenix repository.
 # This script sets up the conda environment, installs the package,
 # downloads required binaries and data, and sets up the necessary tools.
 #
+# Usage:
+#   ./install.sh              # Full install (env + package + binaries + weights + DBs)
+#   ./install.sh --no-db      # Skip database download (weights still downloaded)
+#   ./install.sh -h | --help  # Show usage
+#
 
 set -euo pipefail
 
+# --- Argument Parsing ---
+SKIP_DB=0
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  --no-db       Skip downloading the large ColabFold database (colabfold_db.tar).
+                The VHH search database is still downloaded.
+  -h, --help    Show this help message and exit
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-db)
+            SKIP_DB=1
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
 # --- Configuration Variables ---
-# (Edit these to match your local setup)
-
-# Name for the Conda environment
 ENV_NAME="protenix"
-
-# Base directory for installing external binaries like MMseqs2
 INSTALL_PREFIX="$HOME/protenix_bin"
-
-# Directory to store model weights/checkpoints
 WEIGHTS_DIR="$HOME/checkpoint"
-
-# Directory to store search databases (PDB, VHH, etc.)
 DB_DIR="$HOME/protenix_dbs"
-
-# GCS bucket for downloading weights and databases.
-# This should be the base path containing 'checkpoint' and 'search_database' folders.
 GCS_BUCKET="gs://em52-ab-develop-analytics-prod-f684/data/denovo-design/snakemake/data/01_raw/protenix-inputs"
-
-# Version for MMseqs2 to be built from source
 MMSEQS_VERSION="16-747c6"
 
 # --- Script Start ---
@@ -41,30 +64,26 @@ echo "  Install Prefix: $INSTALL_PREFIX"
 echo "  Weights Dir:    $WEIGHTS_DIR"
 echo "  Database Dir:   $DB_DIR"
 echo "  GCS Bucket:     $GCS_BUCKET"
+echo "  Skip DB:        $([[ $SKIP_DB -eq 1 ]] && echo yes || echo no)"
 echo "=================================="
 
 # --- Step 1: Conda Environment Setup ---
 echo "=== Step 1: Setting up Conda environment: '$ENV_NAME' ==="
 
-# Use mamba if available, otherwise fall back to conda
 CONDA_CMD="conda"
 if command -v mamba &> /dev/null; then
     CONDA_CMD="mamba"
     echo "Mamba detected, using it for faster environment creation."
 fi
 
-# Check if environment already exists
 if "$CONDA_CMD" env list | grep -q "^${ENV_NAME}\s"; then
     echo "Conda environment '$ENV_NAME' already exists. Skipping creation."
 else
     echo "Creating Conda environment from 'protenix_env.yaml'..."
-    # Logic from: protenix_env.yaml, setup.sh
-    "$CONDA_CMD" env create -f protenix_env.yaml
+    "$CONDA_CMD" env create --quiet -f protenix_env.yaml
     echo "Environment created."
 fi
 
-# Activate the environment for the rest of the script
-# shellcheck disable=SC1091
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$ENV_NAME"
 
@@ -74,26 +93,54 @@ echo "Conda prefix: $CONDA_PREFIX"
 
 # --- Step 2: Install Protenix Package ---
 echo "=== Step 2: Installing Protenix (non-editable) ==="
-# Logic from: setup.sh, run_setup.sh
 pip install .
 echo "Protenix package installed."
 
-# --- Step 3: Install CUDA Toolkit ---
-echo "=== Step 3: Installing CUDA Toolkit for PyTorch ==="
-# Logic from: setup.sh, run_setup.sh
-if ! python -c "import torch; print(torch.version.cuda)" &> /dev/null; then
-    echo "PyTorch with CUDA support not found. Skipping CUDA Toolkit installation."
-    echo "Please ensure you have the correct PyTorch version installed for your GPU."
-else
-    CUDA_VERSION="$(python -c 'import torch; print(torch.version.cuda)')"
-    echo "Detected CUDA version $CUDA_VERSION from PyTorch."
-    pip install "cuda-toolkit==${CUDA_VERSION}"
-    echo "CUDA Toolkit installed."
+# --- Step 3: Install real CUDA Toolkit (nvcc + headers) into conda env ---
+echo "=== Step 3: Installing CUDA Toolkit (nvcc + headers) ==="
+
+if ! python -c "import torch" &> /dev/null; then
+    echo "ERROR: PyTorch not importable. Aborting."
+    exit 1
 fi
+
+CUDA_VERSION="$(python -c 'import torch; print(torch.version.cuda)')"
+echo "PyTorch was built against CUDA ${CUDA_VERSION}."
+
+# Remove the useless stub pip package if present
+pip uninstall -y cuda-toolkit 2>/dev/null || true
+
+if command -v nvcc &> /dev/null && find "$CONDA_PREFIX" -name "cuda_runtime_api.h" -print -quit | grep -q .; then
+    echo "nvcc and CUDA headers already present. Skipping toolkit install."
+else
+    echo "Installing NVIDIA CUDA Toolkit ${CUDA_VERSION} (with headers) into conda env..."
+    "$CONDA_CMD" install -y -n "$ENV_NAME" \
+        -c "nvidia/label/cuda-${CUDA_VERSION}.0" \
+        cuda-toolkit cuda-cudart-dev cuda-nvcc cuda-cccl
+fi
+
+# Set env vars for the current session
+export CUDA_HOME="$CONDA_PREFIX"
+export PATH="$CUDA_HOME/bin:$PATH"
+export CPATH="$CONDA_PREFIX/targets/x86_64-linux/include:${CPATH:-}"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+
+# Persist via conda activate hook so future 'conda activate protenix' sets them automatically
+ACTIVATE_DIR="${CONDA_PREFIX}/etc/conda/activate.d"
+mkdir -p "$ACTIVATE_DIR"
+cat > "${ACTIVATE_DIR}/cuda_home.sh" <<'EOF'
+export CUDA_HOME="$CONDA_PREFIX"
+export PATH="$CUDA_HOME/bin:$PATH"
+export CPATH="$CONDA_PREFIX/targets/x86_64-linux/include:${CPATH:-}"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+EOF
+
+echo "CUDA_HOME: $CUDA_HOME"
+echo "CPATH:     $CPATH"
+nvcc --version | tail -1
 
 # --- Step 4: Install HMMER ---
 echo "=== Step 4: Verifying HMMER installation ==="
-# Logic from: protenix_env.yaml
 if command -v hmmsearch &> /dev/null; then
     echo "HMMER (hmmsearch) found at: $(command -v hmmsearch)"
 else
@@ -103,7 +150,6 @@ fi
 
 # --- Step 5: Install MMseqs2 from Source ---
 echo "=== Step 5: Installing MMseqs2 v${MMSEQS_VERSION} from source ==="
-# Logic from: setup.sh
 MMSEQS_BIN_PATH="${INSTALL_PREFIX}/mmseqs2/bin/mmseqs"
 if [[ -f "$MMSEQS_BIN_PATH" ]]; then
     echo "MMseqs2 already found at $MMSEQS_BIN_PATH. Skipping installation."
@@ -126,12 +172,16 @@ else
     make install
     echo "MMseqs2 build complete."
 
-    cd "$REPO_DIR" # Return to repo root
+    cd "$REPO_DIR"
 fi
 
-# Symlink the binary into the conda environment to make it available on the PATH
-if [[ -f "${CONDA_PREFIX}/bin/mmseqs" ]]; then
-    echo "MMseqs2 symlink already exists in conda env."
+if [[ -L "${CONDA_PREFIX}/bin/mmseqs" ]]; then
+    echo "MMseqs2 symlink already exists in conda env. Refreshing..."
+    ln -sf "$MMSEQS_BIN_PATH" "${CONDA_PREFIX}/bin/mmseqs"
+elif [[ -e "${CONDA_PREFIX}/bin/mmseqs" ]]; then
+    echo "Existing (non-symlink) mmseqs found in conda env. Replacing with symlink to built binary..."
+    rm -f "${CONDA_PREFIX}/bin/mmseqs"
+    ln -sf "$MMSEQS_BIN_PATH" "${CONDA_PREFIX}/bin/mmseqs"
 else
     echo "Creating symlink for mmseqs in conda environment..."
     ln -sf "$MMSEQS_BIN_PATH" "${CONDA_PREFIX}/bin/mmseqs"
@@ -143,34 +193,57 @@ echo "MMseqs2 is available at: $(command -v mmseqs)"
 # --- Step 6: Download Model Weights and Databases ---
 echo "=== Step 6: Downloading model weights and search databases ==="
 
-# Download Protenix-V2 weights
 echo "Downloading weights to ${WEIGHTS_DIR}..."
-# Logic from: setup.sh
 mkdir -p "$WEIGHTS_DIR"
 gsutil -m rsync -r "${GCS_BUCKET}/checkpoint/" "${WEIGHTS_DIR}/"
 echo "Weights download complete. Contents:"
 ls -1 "$WEIGHTS_DIR"
 
-# Download search databases (VHH, PDB seqres)
-echo "Downloading search databases to ${DB_DIR}..."
-# Logic from: setup.sh
+echo "Downloading VHH search database to ${DB_DIR}..."
 mkdir -p "$DB_DIR"
 gsutil -m rsync -r "${GCS_BUCKET}/search_database/" "${DB_DIR}/"
-echo "Database download complete. Contents:"
+echo "VHH database download complete. Contents:"
 ls -1R "$DB_DIR"
 
+COLABFOLD_TAR_REMOTE="${GCS_BUCKET}/colabfold_db.tar"
+COLABFOLD_TAR_LOCAL="${DB_DIR}/colabfold_db.tar"
+
+if [[ $SKIP_DB -eq 1 ]]; then
+    echo "--no-db flag set: skipping ColabFold database download."
+    echo "  (Would have downloaded: ${COLABFOLD_TAR_REMOTE})"
+else
+    if [[ -f "$COLABFOLD_TAR_LOCAL" ]]; then
+        echo "ColabFold database already exists at ${COLABFOLD_TAR_LOCAL}. Skipping download."
+    else
+        echo "Downloading ColabFold database (this may take a while)..."
+        gsutil -m cp "$COLABFOLD_TAR_REMOTE" "$COLABFOLD_TAR_LOCAL"
+        echo "Extracting ColabFold database..."
+        tar -xvf "$COLABFOLD_TAR_LOCAL" -C "$DB_DIR"
+        echo "ColabFold database download and extraction complete."
+    fi
+fi
+
 # --- Finalization ---
+# Need to run protenix <command> a first time to build the fast_layer_norm_cuda_v2 module 
+# If this works, then everything passes the test
+protenix pred --help
 echo ""
-echo "✅ Protenix setup complete!"
+echo "Protenix setup complete!"
 echo ""
 echo "To activate the environment, run:"
 echo "  conda activate $ENV_NAME"
 echo ""
 echo "Paths:"
 echo "  - Model Weights:   $WEIGHTS_DIR"
-echo "  - Databases:       $DB_DIR"
+if [[ $SKIP_DB -eq 1 ]]; then
+    echo "  - Databases:       (skipped, re-run without --no-db to fetch)"
+else
+    echo "  - Databases:       $DB_DIR"
+fi
 echo "  - MMseqs2 Binary:  $MMSEQS_BIN_PATH"
+echo "  - CUDA_HOME:       $CUDA_HOME"
 echo ""
 echo "To verify the installation, you can run:"
 echo "  protenix pred --help"
 echo ""
+protenix pred --help

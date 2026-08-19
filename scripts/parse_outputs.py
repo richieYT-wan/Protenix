@@ -38,7 +38,7 @@ def parse_args():
                    help='Root output dir (contains <seq_id>/seed_*/*.cif|json).')
     p.add_argument('-o', '--output_dir', type=Path, default=None,
                    help='If set, write CSVs here (default: <input_dir>/aggregates).')
-    p.add_argument('--n_jobs', type=int, default=16,
+    p.add_argument('-n', '--n_jobs', type=int, default=16,
                    help='Parallel workers for CIF sequence extraction (default: 16).')
     p.add_argument('--rank_by', type=str, default='ranking_score',
                    help='Score to use for "best (seed, sample)" selection.')
@@ -225,7 +225,7 @@ def main():
     df_merged = pd.merge(aggs['best_overall'].rename(columns = {k: f'{k}_best' for k in aggs['best_overall'].columns if k not in ['seq_id', 'mab_id', 'vh', 'eval_hash', 'fablab_hash']}),
                          aggs['best_sample'],
                          on = ['seq_id', 'mab_id', 'vh', 'eval_hash', 'fablab_hash'])
-    df_merged.to_csv(f'{outdir / "confidence_merged.csv"}', index=False)
+    df_merged.to_csv(f'{out_dir / "confidence_merged.csv"}', index=False)
 
 
 
