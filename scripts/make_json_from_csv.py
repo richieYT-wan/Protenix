@@ -44,7 +44,7 @@ def parse_args():
                         metavar=('COLUMN', 'VALUE'), help='A tuple pair of (column,value) for querying a subset of the dataframe. '
                                                           'Example: --subset target_label IL2Rgamma will do `input_df.query("target_label==\'IL2Rgamma\'")')
     parser.add_argument('--sabdab_db', type=str,
-                        default='~/search_database/sabdab_nano/sabdab_nano_db',
+                        default='~/protenix_dbs/sabdab_nano/sabdab_nano_db',
                         help='Path to MMseqs2 OAS nanobody database')
     parser.add_argument('--skip_vhh_msa', action='store_true',
                         help='Skip VHH MSA building (fallback to dummy)')
@@ -80,6 +80,9 @@ def process_target_msa_template(target: Union[List, str], output_dir: Path) -> D
     target_intermediate_dir = Path(output_dir) / 'target'
 
     try:
+        # Do not give --seqres_database_path and let it handle by default
+        # TODO: Change this if / when we need to have a custom database for template search
+        #       Also add custom template search for VHH using scripts/template_search.py with a custom db
         cmd = ["protenix", "mt", "-i", str(tmp_path), "-o", str(output_dir)]
         logger.info(f'Running: {" ".join(cmd)}')
         subprocess.run(

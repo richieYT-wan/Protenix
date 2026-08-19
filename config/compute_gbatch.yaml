@@ -1,0 +1,7 @@
+# main pipeline configuration file for compute environment (bucket) in google batch
+env: "compute"
+
+# gcs bucket configuration
+gcs_project: "awk-ab-develop-axe-prod-da80"
+gcs_bucket: "gs://em52-ab-develop-analytics-prod-f684"
+gcs_bucket_prefix: "/data/denovo-design/snakemake/"

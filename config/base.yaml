@@ -1,0 +1,2 @@
+# main pipeline configuration file for development / local execution
+env: "base"

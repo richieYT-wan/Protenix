@@ -95,9 +95,23 @@ def run_template_search(
     if seqres_database_path is None:
         _HOME_DIR = pathlib.Path(os.environ.get("PROTENIX_ROOT_DIR", str(Path.home())))
         _SEQRES_DATABASE_PATH = (
-            _HOME_DIR / "search_database" / "pdb_seqres_2022_09_28.fasta"
+                _HOME_DIR / "search_database" / "pdb_seqres_2022_09_28.fasta"
         )
-        seqres_database_path = _SEQRES_DATABASE_PATH.as_posix()
+        _FALLBACK_PATH = (
+                _HOME_DIR / "protenix_dbs" / "pdb_seqres_2022_09_28.fasta"
+        )
+        if _SEQRES_DATABASE_PATH.exists():
+            seqres_database_path = _SEQRES_DATABASE_PATH.as_posix()
+        elif _FALLBACK_PATH.exists():
+            logger.info(
+                f"Primary path {_SEQRES_DATABASE_PATH} not found; "
+                f"using fallback {_FALLBACK_PATH}"
+            )
+            seqres_database_path = _FALLBACK_PATH.as_posix()
+        else:
+            # Neither exists — set to primary so the download block below runs
+            seqres_database_path = _SEQRES_DATABASE_PATH.as_posix()
+
     if not os.path.exists(seqres_database_path):
         from runner.inference import download_from_url
 
